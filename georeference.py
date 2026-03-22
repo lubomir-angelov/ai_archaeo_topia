@@ -20,8 +20,8 @@ gdal.UseExceptions()
 SCRIPT_DIR = Path(__file__).resolve().parent          
 
 # PATHS
-INPUT_FOLDER  = SCRIPT_DIR / "maps"
-OUTPUT_FOLDER = SCRIPT_DIR / "georeferenced"
+INPUT_FOLDER  = SCRIPT_DIR / "data/maps"
+OUTPUT_FOLDER = SCRIPT_DIR / "data/georeferenced"
 GEOJSON_PATH  = SCRIPT_DIR / "grid_25k.geojson"
 
 OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
@@ -357,8 +357,17 @@ def detect_frame_projection(image_path):
     c_tr = intersect(lt, lr)
     c_br = intersect(lb, lr)
     c_bl = intersect(lb, ll)
-    
-    return [c_tl, c_tr, c_br, c_bl]
+
+    # add debug overlay to return type
+    pixel_coords = [c_tl, c_tr, c_br, c_bl]
+    debug_data = {
+        "top_pts": top_pts,
+        "bot_pts": bot_pts,
+        "left_pts": left_pts,
+        "right_pts": right_pts,
+    }
+
+    return pixel_coords, debug_data
 
 # ==========================================
 # PART 3: PROCESSOR & ANALYTICS
@@ -424,11 +433,24 @@ def process_image(img_path, geo_info, epsg, output_dir):
     
     try:
         # 1. Detect
-        pixel_coords = detect_frame_projection(img_path)
+        # pixel_coords = detect_frame_projection(img_path)
+        pixel_coords, debug_data = detect_frame_projection(img_path)
         world_coords = geo_info['coords']
         
         # 2. Stats
         rmse, ppm, px_w, ar_diff = calculate_stats(pixel_coords, world_coords)
+
+        # 2.1 Save Debug Overlay (Optional)
+        debug_out_path = os.path.join(output_dir, base_name + "_debug.png")
+        save_debug_overlay(
+            image_path=img_path,
+            pixel_coords=pixel_coords,
+            top_pts=debug_data["top_pts"],
+            bot_pts=debug_data["bot_pts"],
+            left_pts=debug_data["left_pts"],
+            right_pts=debug_data["right_pts"],
+            out_path=debug_out_path,
+        )
         
         # 3. Create VRT & Warp
         src_data = cv2.imread(img_path)

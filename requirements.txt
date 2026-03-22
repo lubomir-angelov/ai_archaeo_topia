@@ -1,0 +1,4 @@
+osgeo
+opencv-python
+numpy
+tqdm
