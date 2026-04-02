@@ -258,4 +258,28 @@ def mean_corner_distance(a, b):
     
     return float(np.mean(np.linalg.norm(pa - pb, axis=1)))
 
+
+def build_side_variants(point_sets_by_rank, orientation, residual_thresh, side_name):
+    """
+    Build multiple fitted line hypotheses for one side.
+
+    Returns:
+        list of tuples: (variant_name, fitted_line, points_used)
+    """
+    variants = []
+
+    for rank, pts in enumerate(point_sets_by_rank):
+        if len(pts) < 3:
+            continue
+
+        line_simple = fit_line_simple(pts, orientation)
+        if line_simple is not None:
+            variants.append((f"{side_name}_r{rank}_simple", line_simple, pts))
+
+        line_rob = robust_fit_line(pts, orientation, residual_thresh)
+        if line_rob is not None:
+            variants.append((f"{side_name}_r{rank}_robust", line_rob, pts))
+
+    return variants
+
     
