@@ -10,7 +10,7 @@ import csv
 from pathlib import Path
 from tqdm import tqdm  # Progress Bar
 
-from utils import mean_corner_distance, read_image_gray_any, read_image_color_any, normalize_to_uint8, robust_fit_line, rectangle_sanity_score, preprocess_for_line_detection
+from utils import mean_corner_distance, read_image_gray_any, read_image_color_any, robust_fit_line
 
 # Enable GDAL Exceptions
 gdal.UseExceptions()
@@ -279,7 +279,8 @@ def intersect(lh, lv):
     y = m1 * x + c1
     return (x, y)
 
-def detect_frame_projection(image_path):
+
+def detect_frame_projection(image_path, world_coords, expected_ppm):
     
     # makes the results worse
     # img_gray = read_image_gray_any(image_path)
@@ -416,7 +417,9 @@ def detect_frame_projection(image_path):
             intersect(lb_simple, lr_simple),
             intersect(lb_simple, ll_simple),
         ]
-        score_simple = rectangle_sanity_score(px_simple, w, h)
+
+        score_simple = score_candidate(px_simple, world_coords, w, h, expected_ppm)
+
         candidates.append(("simple", px_simple, score_simple))
 
     # Candidate 2: robust
@@ -427,7 +430,9 @@ def detect_frame_projection(image_path):
             intersect(lb_rob, lr_rob),
             intersect(lb_rob, ll_rob),
         ]
-        score_rob = rectangle_sanity_score(px_rob, w, h)
+
+        score_rob = score_candidate(px_rob, world_coords, w, h, expected_ppm)
+
         candidates.append(("robust", px_rob, score_rob))
 
     if not candidates:
@@ -514,6 +519,24 @@ def calculate_stats(pixel_coords, world_coords):
 
     return rmse, ppm, px_width_avg, ar_diff
 
+def score_candidate(pixel_coords, world_coords, img_w, img_h, expected_ppm=None):
+    rmse, ppm, _, ar_diff = calculate_stats(pixel_coords, world_coords)
+
+    pts = np.asarray(pixel_coords, dtype=np.float32)
+
+    # Penalize corners outside image
+    oob_penalty = 0.0
+    if np.any(pts[:, 0] < 0) or np.any(pts[:, 0] >= img_w):
+        oob_penalty += 1000.0
+    if np.any(pts[:, 1] < 0) or np.any(pts[:, 1] >= img_h):
+        oob_penalty += 1000.0
+
+    ppm_penalty = 0.0
+    if expected_ppm is not None and expected_ppm > 0:
+        ppm_penalty = abs(ppm - expected_ppm) / expected_ppm
+
+    return rmse + 50.0 * ar_diff + 20.0 * ppm_penalty + oob_penalty
+
 def process_image(img_path, geo_info, epsg, output_dir):
     filename = os.path.basename(img_path)
     base_name = os.path.splitext(filename)[0]
@@ -524,9 +547,14 @@ def process_image(img_path, geo_info, epsg, output_dir):
     try:
         # 1. Detect
         # pixel_coords = detect_frame_projection(img_path)
-        pixel_coords, debug_data = detect_frame_projection(img_path)
-        world_coords = geo_info['coords']
-        
+
+        world_coords = geo_info["coords"]
+        pixel_coords, debug_data = detect_frame_projection(
+            img_path,
+            world_coords=world_coords,
+            expected_ppm=0.4724,  # or compute from config later
+        )
+
         # 2. Stats
         rmse, ppm, px_w, ar_diff = calculate_stats(pixel_coords, world_coords)
 

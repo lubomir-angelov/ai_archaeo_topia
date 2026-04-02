@@ -255,4 +255,7 @@ def preprocess_for_line_detection(img_gray):
 def mean_corner_distance(a, b):
     pa = np.array(a, dtype=np.float32)
     pb = np.array(b, dtype=np.float32)
+    
     return float(np.mean(np.linalg.norm(pa - pb, axis=1)))
+
+    
