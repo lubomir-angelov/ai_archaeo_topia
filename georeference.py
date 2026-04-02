@@ -34,32 +34,47 @@ DEFAULT_EPSG = 25835
 # PART 0: DEBUGGING & VISUALIZATION
 # ==========================================
 
-def save_debug_overlay(image_path, pixel_coords, top_pts, bot_pts, left_pts, right_pts, out_path):
-    img = read_image_gray_any(image_path)
-    if img is None:
-        return
+def save_debug_overlay(
+    image_path,
+    pixel_coords,
+    top_pts,
+    bot_pts,
+    left_pts,
+    right_pts,
+    out_path,
+):
+    # Try color first
+    try:
+        img_rgb = read_image_color_any(image_path)   # your util returns RGB
+        img = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
+    except Exception:
+        gray = read_image_gray_any(image_path)
+        img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
 
-    # strip points
+    # Top/bottom points = green
     for x, y in top_pts:
-        cv2.circle(img, (int(x), int(y)), 4, (0, 255, 0), -1)
+        cv2.circle(img, (int(x), int(y)), 6, (0, 255, 0), -1)
     for x, y in bot_pts:
-        cv2.circle(img, (int(x), int(y)), 4, (0, 200, 0), -1)
+        cv2.circle(img, (int(x), int(y)), 6, (0, 220, 0), -1)
+
+    # Left/right points = blue
     for x, y in left_pts:
-        cv2.circle(img, (int(x), int(y)), 4, (255, 0, 0), -1)
+        cv2.circle(img, (int(x), int(y)), 6, (255, 0, 0), -1)
     for x, y in right_pts:
-        cv2.circle(img, (int(x), int(y)), 4, (200, 0, 0), -1)
+        cv2.circle(img, (int(x), int(y)), 6, (220, 0, 0), -1)
 
-    # final polygon
+    # Final polygon = RED and thicker
     pts = np.array(pixel_coords, dtype=np.int32).reshape((-1, 1, 2))
-    cv2.polylines(img, [pts], isClosed=True, color=(0, 0, 255), thickness=3)
+    cv2.polylines(img, [pts], isClosed=True, color=(0, 0, 255), thickness=6)
 
+    # Corner labels = yellow
     for i, (x, y) in enumerate(pixel_coords):
         cv2.putText(
             img,
             f"C{i+1}",
             (int(x) + 10, int(y) - 10),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
+            1.0,
             (0, 255, 255),
             2,
             cv2.LINE_AA,
