@@ -10,7 +10,7 @@ import csv
 from pathlib import Path
 from tqdm import tqdm  # Progress Bar
 
-from utils import read_image_gray_any, read_image_color_any, normalize_to_uint8, robust_fit_line, rectangle_sanity_score
+from utils import read_image_gray_any, read_image_color_any, normalize_to_uint8, robust_fit_line, rectangle_sanity_score, preprocess_for_line_detection
 
 # Enable GDAL Exceptions
 gdal.UseExceptions()
@@ -42,6 +42,7 @@ def save_debug_overlay(
     left_pts,
     right_pts,
     out_path,
+    debug_data,
 ):
     # Try color first
     try:
@@ -69,16 +70,18 @@ def save_debug_overlay(
 
     # Corner labels = yellow
     for i, (x, y) in enumerate(pixel_coords):
-        cv2.putText(
-            img,
-            f"C{i+1}",
-            (int(x) + 10, int(y) - 10),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1.0,
-            (0, 255, 255),
-            2,
-            cv2.LINE_AA,
-        )
+        label = f'{debug_data["best_candidate"]} | score={debug_data["best_score"]:.2f}'
+        cv2.putText(img, label, (30, 40), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2, cv2.LINE_AA)
+        # cv2.putText(
+        #     img,
+        #     f"C{i+1}",
+        #     (int(x) + 10, int(y) - 10),
+        #     cv2.FONT_HERSHEY_SIMPLEX,
+        #     1.0,
+        #     (0, 255, 255),
+        #     2,
+        #     cv2.LINE_AA,
+        # )
 
     cv2.imwrite(out_path, img)
 
@@ -135,8 +138,10 @@ def load_geojson_database(json_path, name_field):
     try:
         crs = data.get('crs', {}).get('properties', {}).get('name', '')
         m = re.search(r'EPSG[:]+(\d+)', crs, re.IGNORECASE)
-        if m: epsg = int(m.group(1))
-    except: pass
+        if m: 
+            epsg = int(m.group(1))
+    except: 
+        pass
 
     db = {}
     for ft in data.get('features', []):
@@ -267,7 +272,9 @@ def intersect(lh, lv):
 
 def detect_frame_projection(image_path):
     
-    img = read_image_gray_any(image_path)
+    img_gray = read_image_gray_any(image_path)
+
+    img = preprocess_for_line_detection(img_gray)
 
     h, w = img.shape
     
@@ -488,6 +495,7 @@ def process_image(img_path, geo_info, epsg, output_dir):
 
         # 2.1 Save Debug Overlay (Optional)
         debug_out_path = os.path.join(output_dir, base_name + "_debug.png")
+
         save_debug_overlay(
             image_path=img_path,
             pixel_coords=pixel_coords,
@@ -496,6 +504,7 @@ def process_image(img_path, geo_info, epsg, output_dir):
             left_pts=debug_data["left_pts"],
             right_pts=debug_data["right_pts"],
             out_path=debug_out_path,
+            debug_data=debug_data
         )
         
         # 3. Create VRT & Warp

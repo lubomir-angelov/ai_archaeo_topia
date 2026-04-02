@@ -234,3 +234,20 @@ def filter_points_by_position(points, orientation, image_w, image_h):
                 filtered.append((x, y))
 
     return filtered
+
+
+def preprocess_for_line_detection(img_gray):
+    blur = cv2.GaussianBlur(img_gray, (5, 5), 0)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    eq = clahe.apply(blur)
+
+    bw = cv2.adaptiveThreshold(
+        eq,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY,
+        31,
+        7,
+    )
+    
+    return bw
