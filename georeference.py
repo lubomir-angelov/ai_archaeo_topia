@@ -11,7 +11,7 @@ from pathlib import Path
 from tqdm import tqdm  # Progress Bar
 from itertools import product
 
-from utils import build_side_variants, mean_corner_distance, read_image_gray_any, read_image_color_any, robust_fit_line
+from utils import build_side_variants, read_image_gray_any, read_image_color_any
 
 # Enable GDAL Exceptions
 gdal.UseExceptions()
@@ -261,31 +261,6 @@ def find_line_candidates_in_strip(
 
     return deduped[:max_candidates]
 
-def fit_line_simple(points, orientation):
-    if len(points) < 3: 
-        return None
-    pts = np.array(points)
-    
-    if orientation == 'h': 
-        X = pts[:, 0]
-        y = pts[:, 1]
-    else: 
-        X = pts[:, 1]
-        y = pts[:, 0]
-        
-    median_val = np.median(y)
-    mask = np.abs(y - median_val) < 50 
-    clean_pts = pts[mask]
-    
-    if len(clean_pts) < 2: return None
-    
-    if orientation == 'h':
-        m, c = np.polyfit(clean_pts[:, 0], clean_pts[:, 1], 1)
-    else:
-        m, c = np.polyfit(clean_pts[:, 1], clean_pts[:, 0], 1) 
-        
-    return m, c
-
 def intersect(lh, lv):
     if not lh or not lv: return (0,0)
     m1, c1 = lh
@@ -454,29 +429,45 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
 
     candidates = []
 
-    for (top_name, top_line, _), (bot_name, bot_line, _), (left_name, left_line, _), (right_name, right_line, _) in product(
+    for top_v, bot_v, left_v, right_v in product(
         top_variants,
         bot_variants,
         left_variants,
         right_variants,
     ):
         pixel_coords = [
-            intersect(top_line, left_line),
-            intersect(top_line, right_line),
-            intersect(bot_line, right_line),
-            intersect(bot_line, left_line),
+            intersect(top_v["line"], left_v["line"]),
+            intersect(top_v["line"], right_v["line"]),
+            intersect(bot_v["line"], right_v["line"]),
+            intersect(bot_v["line"], left_v["line"]),
         ]
-    
+
         score = score_candidate(pixel_coords, world_coords, w, h, expected_ppm)
-    
+
         candidate_info = {
-            "label": f"{top_name}|{bot_name}|{left_name}|{right_name}",
+            "label": f'{top_v["name"]}|{bot_v["name"]}|{left_v["name"]}|{right_v["name"]}',
             "pixel_coords": pixel_coords,
             "score": score,
-            "top_variant": top_name,
-            "bottom_variant": bot_name,
-            "left_variant": left_name,
-            "right_variant": right_name,
+            "top_variant": top_v["name"],
+            "bottom_variant": bot_v["name"],
+            "left_variant": left_v["name"],
+            "right_variant": right_v["name"],
+            "top_rank": top_v["rank"],
+            "bottom_rank": bot_v["rank"],
+            "left_rank": left_v["rank"],
+            "right_rank": right_v["rank"],
+            "top_method": top_v["method"],
+            "bottom_method": bot_v["method"],
+            "left_method": left_v["method"],
+            "right_method": right_v["method"],
+            "top_points": top_v["points"],
+            "bottom_points": bot_v["points"],
+            "left_points": left_v["points"],
+            "right_points": right_v["points"],
+            "top_points_count": len(top_v["points"]),
+            "bottom_points_count": len(bot_v["points"]),
+            "left_points_count": len(left_v["points"]),
+            "right_points_count": len(right_v["points"]),
         }
 
         candidates.append(candidate_info)
@@ -491,16 +482,24 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
     best_score = best_candidate["score"]
     
     debug_data = {
-       "top_pts": top_pts_by_rank[0],
-       "bot_pts": bot_pts_by_rank[0],
-       "left_pts": left_pts_by_rank[0],
-       "right_pts": right_pts_by_rank[0],
-       "best_candidate": best_name,
-       "best_score": float(best_score),
-       "top_variant": best_candidate["top_variant"],
-       "bottom_variant": best_candidate["bottom_variant"],
-       "left_variant": best_candidate["left_variant"],
-       "right_variant": best_candidate["right_variant"],
+        "top_pts": best_candidate["top_points"],
+        "bot_pts": best_candidate["bottom_points"],
+        "left_pts": best_candidate["left_points"],
+        "right_pts": best_candidate["right_points"],
+        "best_candidate": best_name,
+        "best_score": float(best_score),
+        "top_variant": best_candidate["top_variant"],
+        "bottom_variant": best_candidate["bottom_variant"],
+        "left_variant": best_candidate["left_variant"],
+        "right_variant": best_candidate["right_variant"],
+        "top_rank": best_candidate["top_rank"],
+        "bottom_rank": best_candidate["bottom_rank"],
+        "left_rank": best_candidate["left_rank"],
+        "right_rank": best_candidate["right_rank"],
+        "top_method": best_candidate["top_method"],
+        "bottom_method": best_candidate["bottom_method"],
+        "left_method": best_candidate["left_method"],
+        "right_method": best_candidate["right_method"],
     }
 
     return pixel_coords, debug_data
@@ -565,7 +564,6 @@ def score_candidate(pixel_coords, world_coords, img_w, img_h, expected_ppm=None)
 
     pts = np.asarray(pixel_coords, dtype=np.float32)
 
-    # Penalize corners outside image
     oob_penalty = 0.0
     if np.any(pts[:, 0] < 0) or np.any(pts[:, 0] >= img_w):
         oob_penalty += 1000.0
@@ -577,6 +575,7 @@ def score_candidate(pixel_coords, world_coords, img_w, img_h, expected_ppm=None)
         ppm_penalty = abs(ppm - expected_ppm) / expected_ppm
 
     return rmse + 50.0 * ar_diff + 20.0 * ppm_penalty + oob_penalty
+
 
 def process_image(img_path, geo_info, epsg, output_dir):
     filename = os.path.basename(img_path)
