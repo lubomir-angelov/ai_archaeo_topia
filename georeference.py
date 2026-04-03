@@ -315,6 +315,9 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
     cw, ch = w // strips, h // strips
     
     top_pts, bot_pts, left_pts, right_pts = [], [], [], []
+
+    mask_zone_size = 0
+    mask_zone_size_r = 0
     
     # ========== TOP ==========
     for i in range(strips):
@@ -335,7 +338,7 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
             strip_b = np.flipud(strip_b_clean) 
             
             # Mask Legend
-            mask_zone_size = int(h * 0.055) 
+            # mask_zone_size = int(h * 0.055) 
             if mask_zone_size < strip_b.shape[0]:
                 strip_b[0:mask_zone_size, :] = 255 
             
@@ -367,7 +370,7 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
         strip_r = np.fliplr(strip_r_clean) 
         
         # Mask Outer Frame
-        mask_zone_size_r = int(w * 0.035) 
+        # mask_zone_size_r = int(w * 0.035) 
         if mask_zone_size_r < strip_r.shape[1]:
             strip_r[:, 0:mask_zone_size_r] = 255 
             

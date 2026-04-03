@@ -307,7 +307,21 @@ def compute_strip_weights(points, orientation, total_strips):
     # distance = |i - center| / center
     # weight = 1.0 - 0.5 * distance
     distances = np.abs(strip_indices - center) / center
-    weights = 1.0 - 0.5 * np.clip(distances, 0, 1.0)
+
+
+    # weights = 1.0 - 0.5 * np.clip(distances, 0, 1.0)
+
+    # Make edge strips REALLY dominant (0.3 at center):
+    # weights = 1.0 - 0.7 * np.clip(distances, 0, 1.0)
+
+    # Softer weighting (0.8 at center):
+    #weights = 1.0 - 0.2 * np.clip(distances, 0, 1.0)
+
+    # Square-law falloff (more aggressive):
+    #weights = (1.0 - np.clip(distances, 0, 1.0) ** 2)
+
+    # make edges stronger than center
+    weights = 0.3 + 0.7 * np.clip(distances, 0, 1.0)
     
     return weights
 
