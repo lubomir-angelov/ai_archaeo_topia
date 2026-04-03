@@ -1,3 +1,4 @@
+import argparse
 import cv2
 import numpy as np
 from osgeo import gdal, osr
@@ -539,7 +540,7 @@ def score_candidate(pixel_coords, world_coords, img_w, img_h, expected_ppm=None)
 
     return rmse + 50.0 * ar_diff + 20.0 * ppm_penalty + oob_penalty
 
-def process_image(img_path, geo_info, epsg, output_dir):
+def process_image(img_path, geo_info, epsg, output_dir, write_warps=False):
     filename = os.path.basename(img_path)
     base_name = os.path.splitext(filename)[0]
     ml_out_path = os.path.join(output_dir, base_name + "_georef.tif")
@@ -590,50 +591,67 @@ def process_image(img_path, geo_info, epsg, output_dir):
         )
         result["debug_written"] = True
 
-        # 4. Warp
-        src_data = read_image_color_any(img_path)
-        h, w, _ = src_data.shape
+        # 4. Optional warp
+        if write_warps:
+            src_data = read_image_color_any(img_path)
+            h, w, _ = src_data.shape
 
-        mem_drv = gdal.GetDriverByName("MEM")
-        ds = mem_drv.Create("", w, h, 3, gdal.GDT_Byte)
-        for i in range(3):
-            ds.GetRasterBand(i + 1).WriteArray(src_data[:, :, i])
+            mem_drv = gdal.GetDriverByName("MEM")
+            ds = mem_drv.Create("", w, h, 3, gdal.GDT_Byte)
+            for i in range(3):
+                ds.GetRasterBand(i + 1).WriteArray(src_data[:, :, i])
 
-        gdal_gcps = [
-            gdal.GCP(world_coords[i][0], world_coords[i][1], 0, pixel_coords[i][0], pixel_coords[i][1])
-            for i in range(4)
-        ]
+            gdal_gcps = [
+                gdal.GCP(
+                    world_coords[i][0],
+                    world_coords[i][1],
+                    0,
+                    pixel_coords[i][0],
+                    pixel_coords[i][1],
+                )
+                for i in range(4)
+            ]
 
-        srs = osr.SpatialReference()
-        srs.ImportFromEPSG(epsg)
-        vrt = gdal.Translate("", ds, format="VRT", outputSRS=srs.ExportToWkt(), GCPs=gdal_gcps)
+            srs = osr.SpatialReference()
+            srs.ImportFromEPSG(epsg)
+            vrt = gdal.Translate(
+                "",
+                ds,
+                format="VRT",
+                outputSRS=srs.ExportToWkt(),
+                GCPs=gdal_gcps,
+            )
 
-        warp_ds = gdal.Warp(
-            ml_out_path,
-            vrt,
-            dstSRS=srs,
-            polynomialOrder=1,
-            tps=False,
-            resampleAlg=gdal.GRA_Lanczos,
-            format="COG",
-            dstAlpha=True,
-            creationOptions=[
-                "COMPRESS=LZW",
-                "PREDICTOR=2",
-                "BIGTIFF=IF_NEEDED",
-                "OVERVIEWS=IGNORE_EXISTING",
-            ],
-        )
-        result["warp_written"] = warp_ds is not None
+            warp_ds = gdal.Warp(
+                ml_out_path,
+                vrt,
+                dstSRS=srs,
+                polynomialOrder=1,
+                tps=False,
+                resampleAlg=gdal.GRA_Lanczos,
+                format="COG",
+                dstAlpha=True,
+                creationOptions=[
+                    "COMPRESS=LZW",
+                    "PREDICTOR=2",
+                    "BIGTIFF=IF_NEEDED",
+                    "OVERVIEWS=IGNORE_EXISTING",
+                ],
+            )
+            result["warp_written"] = warp_ds is not None
+        else:
+            result["warp_written"] = False
 
         # 5. Quality
-        result["quality_ok"] = (
-            result["warp_written"]
-            and rmse <= 20.0
+        # Check geometry quality and whether we are applying warps, to include quality when debugging.
+        geometry_ok = (
+            rmse <= 20.0
             and ar_diff <= 0.02
             and 0.460 <= ppm <= 0.485
         )
-
+        
+        result["quality_ok"] = geometry_ok and (result["warp_written"] if write_warps else True)
+        
         result["message"] = "Success"
         return result
 
@@ -738,7 +756,23 @@ Note: This check is smart—it only reports missing maps for the specific
     with open(os.path.join(folder_path, "_DIAGNOSIS_KEY.txt"), "w", encoding='utf-8') as f:
         f.write(legend_text)
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Georeference scanned maps using frame detection and optional GDAL warp."
+    )
+    parser.add_argument(
+        "--write-warps",
+        action="store_true",
+        help="Run the slow GDAL warp step and write georeferenced COG outputs.",
+    )
+    return parser.parse_args()
+
 def main():
+    args = parse_args()
+
+    print(f"Write warps: {'YES' if args.write_warps else 'NO'}")
+
     if not os.path.exists(OUTPUT_FOLDER): 
         os.makedirs(OUTPUT_FOLDER)
     
@@ -808,7 +842,13 @@ def main():
                     parent_id = "-".join(parts[:3])
                     active_parents.add(parent_id)
                 
-                result = process_image(img_path, match, epsg, OUTPUT_FOLDER)
+                result = process_image(
+                    img_path=img_path, 
+                    geo_info=match,
+                    epsg=epsg, 
+                    output_dir=OUTPUT_FOLDER,
+                    write_warps=args.write_warps
+                )
 
                 matched_count += 1
 
