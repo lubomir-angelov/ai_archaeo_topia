@@ -442,10 +442,12 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
 
     max_allowed_shift = 0.001 * max(w, h)  # tune if needed
 
+    shift = None
+
     if all([lt_simple, lb_simple, ll_simple, lr_simple]) and all([lt_rob, lb_rob, ll_rob, lr_rob]):
         shift = mean_corner_distance(px_simple, px_rob)
 
-    if shift > max_allowed_shift and score_rob >= score_simple:
+    if shift is not None and shift > max_allowed_shift and score_rob >= score_simple:
         best_name, pixel_coords, best_score = "simple", px_simple, score_simple
     else:
         best_name, pixel_coords, best_score = min(
@@ -541,26 +543,41 @@ def process_image(img_path, geo_info, epsg, output_dir):
     filename = os.path.basename(img_path)
     base_name = os.path.splitext(filename)[0]
     ml_out_path = os.path.join(output_dir, base_name + "_georef.tif")
-    
-    # Progress is handled by tqdm in main, so we remove the individual print
-    
-    try:
-        # 1. Detect
-        # pixel_coords = detect_frame_projection(img_path)
 
+    result = {
+        "frame_detected": False,
+        "debug_written": False,
+        "warp_written": False,
+        "quality_ok": False,
+        "message": "",
+        "rmse": 0.0,
+        "ppm": 0.0,
+        "px_width": 0.0,
+        "ar_diff": 0.0,
+        "best_candidate": "",
+    }
+
+    try:
         world_coords = geo_info["coords"]
+
+        # 1. Detection
         pixel_coords, debug_data = detect_frame_projection(
             img_path,
             world_coords=world_coords,
-            expected_ppm=0.4724,  # or compute from config later
+            expected_ppm=0.4724,
         )
+        result["frame_detected"] = True
+        result["best_candidate"] = debug_data.get("best_candidate", "")
 
         # 2. Stats
         rmse, ppm, px_w, ar_diff = calculate_stats(pixel_coords, world_coords)
+        result["rmse"] = rmse
+        result["ppm"] = ppm
+        result["px_width"] = px_w
+        result["ar_diff"] = ar_diff
 
-        # 2.1 Save Debug Overlay (Optional)
+        # 3. Debug image
         debug_out_path = os.path.join(output_dir, base_name + "_debug.png")
-
         save_debug_overlay(
             image_path=img_path,
             pixel_coords=pixel_coords,
@@ -569,35 +586,60 @@ def process_image(img_path, geo_info, epsg, output_dir):
             left_pts=debug_data["left_pts"],
             right_pts=debug_data["right_pts"],
             out_path=debug_out_path,
-            debug_data=debug_data
+            debug_data=debug_data,
         )
-        
-        # 3. Create VRT & Warp
-        src_data = read_image_color_any(img_path)
+        result["debug_written"] = True
 
-        h, w, b = src_data.shape
-        
-        mem_drv = gdal.GetDriverByName('MEM')
-        ds = mem_drv.Create('', w, h, 3, gdal.GDT_Byte)
-        for i in range(3): 
-            ds.GetRasterBand(i+1).WriteArray(src_data[:,:,i])
-        
-        gdal_gcps = [gdal.GCP(world_coords[i][0], world_coords[i][1], 0, pixel_coords[i][0], pixel_coords[i][1]) for i in range(4)]
-        
+        # 4. Warp
+        src_data = read_image_color_any(img_path)
+        h, w, _ = src_data.shape
+
+        mem_drv = gdal.GetDriverByName("MEM")
+        ds = mem_drv.Create("", w, h, 3, gdal.GDT_Byte)
+        for i in range(3):
+            ds.GetRasterBand(i + 1).WriteArray(src_data[:, :, i])
+
+        gdal_gcps = [
+            gdal.GCP(world_coords[i][0], world_coords[i][1], 0, pixel_coords[i][0], pixel_coords[i][1])
+            for i in range(4)
+        ]
+
         srs = osr.SpatialReference()
         srs.ImportFromEPSG(epsg)
-        vrt = gdal.Translate('', ds, format='VRT', outputSRS=srs.ExportToWkt(), GCPs=gdal_gcps)
-        
-        # 4. Warp with Affine (Polynomial 1) for 1:25k
-        gdal.Warp(ml_out_path, vrt, dstSRS=srs, 
-                  polynomialOrder=1, tps=False, 
-                  resampleAlg=gdal.GRA_Lanczos, format='COG', dstAlpha=True,        
-                  creationOptions=['COMPRESS=LZW', 'PREDICTOR=2', 'BIGTIFF=IF_NEEDED', 'OVERVIEWS=IGNORE_EXISTING'])
-        
-        return True, "Success", rmse, ppm, px_w, ar_diff
+        vrt = gdal.Translate("", ds, format="VRT", outputSRS=srs.ExportToWkt(), GCPs=gdal_gcps)
+
+        warp_ds = gdal.Warp(
+            ml_out_path,
+            vrt,
+            dstSRS=srs,
+            polynomialOrder=1,
+            tps=False,
+            resampleAlg=gdal.GRA_Lanczos,
+            format="COG",
+            dstAlpha=True,
+            creationOptions=[
+                "COMPRESS=LZW",
+                "PREDICTOR=2",
+                "BIGTIFF=IF_NEEDED",
+                "OVERVIEWS=IGNORE_EXISTING",
+            ],
+        )
+        result["warp_written"] = warp_ds is not None
+
+        # 5. Quality
+        result["quality_ok"] = (
+            result["warp_written"]
+            and rmse <= 20.0
+            and ar_diff <= 0.02
+            and 0.460 <= ppm <= 0.485
+        )
+
+        result["message"] = "Success"
+        return result
 
     except Exception as e:
-        return False, str(e), 0, 0, 0, 0
+        result["message"] = str(e)
+        return result
 
 def create_legend_file(folder_path):
     legend_text = """
@@ -722,10 +764,31 @@ def main():
         files.extend(glob.glob(os.path.join(INPUT_FOLDER, '**', t), recursive=True))
 
     print(f"Found {len(files)} images.")
+
+    matched_count = 0
+    frame_detected_count = 0
+    debug_written_count = 0
+    warp_written_count = 0
+    quality_ok_count = 0
+    skipped_count = 0
     
     with open(report_file, "w", newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
-        writer.writerow(["Filename", "Original_Name", "Status", "RMSE_m", "PPM_Scale", "AR_Diff_Percent", "Diagnosis", "Message"])
+        writer.writerow([
+            "Filename",
+            "Original_Name",
+            "Matched_Name",
+            "Frame_Detected",
+            "Debug_Written",
+            "Warp_Written",
+            "Quality_OK",
+            "RMSE_m",
+            "PPM_Scale",
+            "AR_Diff_Percent",
+            "Diagnosis",
+            "Best_Candidate",
+            "Message",
+        ])
         
         # --- PROCESS IMAGES with Progress Bar ---
         for img_path in tqdm(files, desc="Processing Maps", unit="map"):
@@ -745,22 +808,68 @@ def main():
                     parent_id = "-".join(parts[:3])
                     active_parents.add(parent_id)
                 
-                success, msg, rmse, ppm, px_width, ar_diff = process_image(img_path, match, epsg, OUTPUT_FOLDER)
+                result = process_image(img_path, match, epsg, OUTPUT_FOLDER)
+
+                matched_count += 1
+
+                if result["frame_detected"]:
+                    frame_detected_count += 1
+                if result["debug_written"]:
+                    debug_written_count += 1
+                if result["warp_written"]:
+                    warp_written_count += 1
+                if result["quality_ok"]:
+                    quality_ok_count += 1
                 
                 diagnosis = "OK"
-                if not success: diagnosis = "FAILED"
-                else:
-                    # STRICT THRESHOLDS FOR 300 DPI 1:25000 (Target PPM 0.472)
-                    if rmse > 20.0: diagnosis = "BAD GEOMETRY (Twisted)"
-                    elif ar_diff > 0.02: diagnosis = "WRONG SHAPE (Trapezoid/Wrong Ratio)"
-                    elif ppm > 0.485: diagnosis = "OUTER FRAME (Too Big)"
-                    elif ppm < 0.460: diagnosis = "INNER GRID (Too Small)"
-                    elif rmse > 10.0: diagnosis = "CHECK VISUALLY"
+                if not result["frame_detected"]:
+                    diagnosis = "DETECTION_FAILED"
+                elif not result["warp_written"]:
+                    diagnosis = "WARP_FAILED"
+                elif result["rmse"] > 20.0:
+                    diagnosis = "BAD GEOMETRY (Twisted)"
+                elif result["ar_diff"] > 0.02:
+                    diagnosis = "WRONG SHAPE (Trapezoid/Wrong Ratio)"
+                elif result["ppm"] > 0.485:
+                    diagnosis = "OUTER FRAME (Too Big)"
+                elif result["ppm"] < 0.460:
+                    diagnosis = "INNER GRID (Too Small)"
+                elif result["rmse"] > 10.0:
+                    diagnosis = "CHECK VISUALLY"
                 
-                writer.writerow([filename, orig_name, "OK" if success else "ERROR", f"{rmse:.2f}", f"{ppm:.4f}", f"{ar_diff*100:.2f}", diagnosis, msg])
+                writer.writerow([
+                    filename,
+                    orig_name,
+                    "YES",
+                    "YES" if result["frame_detected"] else "NO",
+                    "YES" if result["debug_written"] else "NO",
+                    "YES" if result["warp_written"] else "NO",
+                    "YES" if result["quality_ok"] else "NO",
+                    f'{result["rmse"]:.2f}',
+                    f'{result["ppm"]:.4f}',
+                    f'{result["ar_diff"] * 100:.2f}',
+                    diagnosis,
+                    result["best_candidate"],
+                    result["message"],
+                ])
                 f.flush()
             else:
-                writer.writerow([filename, "NONE", "SKIPPED", "", "", "", "NO MATCH", ""])
+                skipped_count += 1
+                writer.writerow([
+                    filename,
+                    "NONE",
+                    "NO",
+                    "NO",
+                    "NO",
+                    "NO",
+                    "NO",
+                    "",
+                    "",
+                    "",
+                    "NO MATCH",
+                    "",
+                    "",
+                ])
 
         # --- FIND MISSING MAPS ---
         print("\nChecking for missing maps in active 1:100k regions...")
@@ -781,10 +890,16 @@ def main():
             writer.writerow(["(NO IMAGE)", name, "MISSING", "", "", "", "MISSING_FROM_FOLDER", f"Map missing from active region"])
             missing_count += 1
             
-    print(f"\nProcessing complete. Report: {report_file}")
-    print(f"Maps Processed:     {len(found_map_names)}")
-    print(f"Maps Missing:       {missing_count}")
-    print(f"Legend file created: {os.path.join(OUTPUT_FOLDER, '_DIAGNOSIS_KEY.txt')}")
+        print(f"\nProcessing complete. Report: {report_file}")
+        print(f"Images Found:        {len(files)}")
+        print(f"Matched to DB:       {matched_count}")
+        print(f"Frame Detected:      {frame_detected_count}")
+        print(f"Debug Written:       {debug_written_count}")
+        print(f"Warp Written:        {warp_written_count}")
+        print(f"Quality OK:          {quality_ok_count}")
+        print(f"Skipped (No Match):  {skipped_count}")
+        print(f"Maps Missing:        {missing_count}")
+        print(f"Legend file created: {os.path.join(OUTPUT_FOLDER, '_DIAGNOSIS_KEY.txt')}")
 
 if __name__ == "__main__":
     main()

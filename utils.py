@@ -68,7 +68,6 @@ def read_image_gray_any(image_path: str | Path) -> np.ndarray:
     except Exception as exc:
         raise ValueError(f"Could not read image with OpenCV or GDAL: {exc}") from exc
 
-
 def read_image_color_any(image_path: str | Path) -> np.ndarray:
     """Read an image as RGB using OpenCV first, then GDAL fallback.
 
@@ -102,27 +101,56 @@ def read_image_color_any(image_path: str | Path) -> np.ndarray:
         if ds is None:
             raise ValueError("gdal.Open returned None")
 
+        band1 = ds.GetRasterBand(1)
+        if band1 is None:
+            raise ValueError("Dataset has no raster bands")
+
+        # Case A: single-band paletted/indexed image
+        if ds.RasterCount == 1:
+            color_table = band1.GetColorTable()
+            arr = band1.ReadAsArray()
+            if arr is None:
+                raise ValueError("ReadAsArray returned None for band 1")
+
+            if color_table is not None:
+                count = color_table.GetCount()
+                lut = np.zeros((count, 3), dtype=np.uint8)
+
+                for i in range(count):
+                    entry = color_table.GetColorEntry(i)
+                    if entry is None:
+                        continue
+                    r, g, b, _a = entry
+                    lut[i] = [r, g, b]
+
+                idx = arr.astype(np.int32, copy=False)
+                idx = np.clip(idx, 0, count - 1)
+                return lut[idx]
+
+            # True grayscale single-band
+            if arr.dtype != np.uint8:
+                arr = normalize_to_uint8(arr)
+            return np.stack([arr, arr, arr], axis=-1)
+
+        # Case B: multi-band image
         arr = ds.ReadAsArray()
         if arr is None:
             raise ValueError("ReadAsArray returned None")
 
-        if arr.ndim == 2:
-            gray = normalize_to_uint8(arr) if arr.dtype != np.uint8 else arr
-            return np.stack([gray, gray, gray], axis=-1)
+        if arr.ndim != 3:
+            raise ValueError(f"Unsupported GDAL array shape: {arr.shape}")
 
-        if arr.ndim == 3:
-            bands, _, _ = arr.shape
-            if bands >= 3:
-                rgb = np.transpose(arr[:3], (1, 2, 0))
-                if rgb.dtype != np.uint8:
-                    rgb = normalize_to_uint8(rgb)
-                return rgb
+        bands, _, _ = arr.shape
+        if bands < 3:
             gray = arr[0]
             if gray.dtype != np.uint8:
                 gray = normalize_to_uint8(gray)
             return np.stack([gray, gray, gray], axis=-1)
 
-        raise ValueError(f"Unsupported GDAL array shape: {arr.shape}")
+        rgb = np.transpose(arr[:3], (1, 2, 0))
+        if rgb.dtype != np.uint8:
+            rgb = normalize_to_uint8(rgb)
+        return rgb
 
     except Exception as exc:
         raise ValueError(f"Could not read image with OpenCV or GDAL: {exc}") from exc
