@@ -179,7 +179,8 @@ def robust_fit_line(points, orientation, residual_thresh, iterations=200):
     if len(points) < 2:
         return None
 
-    pts = np.asarray(points, dtype=np.float32)
+    # Extract just (x, y) - handle both 2-tuple and 3-tuple points
+    pts = np.asarray([(p[0], p[1]) for p in points], dtype=np.float32)
 
     if orientation == 'h':
         indep = pts[:, 0]  # x
@@ -286,4 +287,59 @@ def mean_corner_distance(a, b):
     
     return float(np.mean(np.linalg.norm(pa - pb, axis=1)))
 
+
+
+def compute_strip_weights(points, orientation, total_strips):
+    """
+    Compute weights for points based on strip distance from edges.
+    Strips near edges (where frame is strongest) get higher weight.
     
+    Points should be tuples: (x, y, strip_index)
+    Returns: numpy array of weights [0.5 .. 1.0]
+    """
+    if not points or len(points[0]) < 3:
+        return np.ones(len(points))
+    
+    strip_indices = np.array([p[2] for p in points])
+    center = total_strips / 2.0
+    
+    # Weight formula: 1.0 at edges, 0.5 at center
+    # distance = |i - center| / center
+    # weight = 1.0 - 0.5 * distance
+    distances = np.abs(strip_indices - center) / center
+    weights = 1.0 - 0.5 * np.clip(distances, 0, 1.0)
+    
+    return weights
+
+def fit_line_weighted(points, orientation, total_strips):
+    """Fit y = m*x + c with point weights based on strip position."""
+    if len(points) < 3: 
+        return None
+    
+    # Extract (x, y) only, ignore strip index
+    pts = np.array([(p[0], p[1]) for p in points])
+    weights = compute_strip_weights(points, orientation, total_strips)
+    
+    if orientation == 'h': 
+        X = pts[:, 0]
+        y = pts[:, 1]
+    else: 
+        X = pts[:, 1]
+        y = pts[:, 0]
+    
+    # Outlier removal (same as simple, on weighted data)
+    median_val = np.median(y)
+    mask = np.abs(y - median_val) < 50 
+    clean_pts = pts[mask]
+    clean_weights = weights[mask]
+    
+    if len(clean_pts) < 2: 
+        return None
+    
+    # Weighted polyfit (numpy supports w parameter)
+    if orientation == 'h':
+        m, c = np.polyfit(clean_pts[:, 0], clean_pts[:, 1], 1, w=clean_weights)
+    else:
+        m, c = np.polyfit(clean_pts[:, 1], clean_pts[:, 0], 1, w=clean_weights)
+    
+    return m, c

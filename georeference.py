@@ -11,7 +11,7 @@ import csv
 from pathlib import Path
 from tqdm import tqdm  # Progress Bar
 
-from utils import mean_corner_distance, read_image_gray_any, read_image_color_any, robust_fit_line
+from utils import fit_line_weighted, mean_corner_distance, read_image_gray_any, read_image_color_any, robust_fit_line
 
 # Enable GDAL Exceptions
 gdal.UseExceptions()
@@ -283,10 +283,6 @@ def intersect(lh, lv):
 
 def detect_frame_projection(image_path, world_coords, expected_ppm):
     
-    # makes the results worse
-    # img_gray = read_image_gray_any(image_path)
-    # img = preprocess_for_line_detection(img_gray)
-
     img = read_image_gray_any(image_path)
 
     h, w = img.shape
@@ -303,14 +299,6 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
     limit_right = int(w * 0.08)   
     limit_bot = int(h * 0.12)     
     
-    # --- CLEANING KERNELS ---
-    # Strong: 50px (Left/Bottom) - Kills dashed lines
-    # clean_kernel_h_strong = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 1))
-    # clean_kernel_v_strong = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 50))
-    
-    # # Weak: 10px (Right) - Removes dust but keeps frame lines safe
-    # clean_kernel_v_weak = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 10))
-
     # --- CLEANING KERNELS (relative to image size) ---
     clean_kernel_h_strong = cv2.getStructuringElement(
         cv2.MORPH_RECT, (max(15, w // 120), 1)
@@ -322,25 +310,21 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
         cv2.MORPH_RECT, (1, max(5, h // 500))
     )
 
-    #strips = 20
+    # Adaptive strip count (height-dependent)
     strips = max(20, h // 200)
     cw, ch = w // strips, h // strips
     
     top_pts, bot_pts, left_pts, right_pts = [], [], [], []
     
+    # ========== TOP ==========
     for i in range(strips):
-        # ---------------------------------------------------------
-        # TOP (Reverted to Original - No Cleaning)
-        # ---------------------------------------------------------
-        # Uses the raw strip directly. Works best when the frame is thin/faint.
         strip_t = img[0:margin_y, i*cw:(i+1)*cw]
-        y = find_line_in_strip_projection(strip_t, 'h', limit_top, mode='first_after_gap')
+        y = find_line_in_strip_projection(strip_t, 'h', limit_top)
         if y is not None: 
-            top_pts.append((i*cw + cw//2, y))
-        
-        # ---------------------------------------------------------
-        # BOTTOM (Strong Cleaning 50px + Masking)
-        # ---------------------------------------------------------
+            top_pts.append((i*cw + cw//2, y, i))  # (x, y, strip_index)
+
+    # ========== BOTTOM ==========
+    for i in range(strips):
         if i < 5 or i >= 15:
             raw_strip = img[h-margin_y_bottom:h, i*cw:(i+1)*cw]
             
@@ -355,13 +339,12 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
             if mask_zone_size < strip_b.shape[0]:
                 strip_b[0:mask_zone_size, :] = 255 
             
-            y_loc = find_line_in_strip_projection(strip_b, 'h', limit_bot, mode='first_after_gap')
+            y_loc = find_line_in_strip_projection(strip_b, 'h', limit_bot)
             if y_loc is not None: 
-                bot_pts.append((i*cw + cw//2, h - 1 - y_loc))
-            
-        # ---------------------------------------------------------
-        # LEFT (Strong Cleaning 50px)
-        # ---------------------------------------------------------
+                bot_pts.append((i*cw + cw//2, h - 1 - y_loc, i))  # (x, y, strip_index)
+
+    # ========== LEFT ==========
+    for i in range(strips):
         raw_strip_l = img[i*ch:(i+1)*ch, 0:margin_x]
         
         # Strong Clean (Remove Dashed Lines)
@@ -369,13 +352,12 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
         cleaned_l = cv2.morphologyEx(inv_l, cv2.MORPH_OPEN, clean_kernel_v_strong)
         strip_l_clean = cv2.bitwise_not(cleaned_l)
         
-        x = find_line_in_strip_projection(strip_l_clean, 'v', limit_left, mode='first_after_gap')
+        x = find_line_in_strip_projection(strip_l_clean, 'v', limit_left)
         if x is not None: 
-            left_pts.append((x, i*ch + ch//2))
-        
-        # ---------------------------------------------------------
-        # RIGHT (Weak Cleaning 10px + Masking)
-        # ---------------------------------------------------------
+            left_pts.append((x, i*ch + ch//2, i))  # (x, y, strip_index)
+
+    # ========== RIGHT ==========
+    for i in range(strips):
         raw_strip_r = img[i*ch:(i+1)*ch, w-margin_x_right:w]
         
         # Weak Clean (Keep frame safe)
@@ -389,29 +371,29 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
         if mask_zone_size_r < strip_r.shape[1]:
             strip_r[:, 0:mask_zone_size_r] = 255 
             
-        x_loc = find_line_in_strip_projection(strip_r, 'v', limit_right, mode='first_after_gap')
+        x_loc = find_line_in_strip_projection(strip_r, 'v', limit_right)
         if x_loc is not None:
-            right_pts.append((w - 1 - x_loc, i*ch + ch//2))
+            right_pts.append((w - 1 - x_loc, i*ch + ch//2, i))  # (x, y, strip_index)
 
-    # residual_thresh = max(4.0, 0.003 * max(h, w)) # too tigh? the line fit starts hugging the wrong border cluster.?
+    # ========== LINE FITTING ==========
     residual_thresh = max(8.0, 0.0015 * max(h, w))
 
-    # old/simple fits
-    lt_simple = fit_line_simple(top_pts, 'h')
-    lb_simple = fit_line_simple(bot_pts, 'h')
-    ll_simple = fit_line_simple(left_pts, 'v')
-    lr_simple = fit_line_simple(right_pts, 'v')
+    # Weighted fits (using strip position)
+    lt_simple = fit_line_weighted(top_pts, 'h', strips)
+    lb_simple = fit_line_weighted(bot_pts, 'h', strips)
+    ll_simple = fit_line_weighted(left_pts, 'v', strips)
+    lr_simple = fit_line_weighted(right_pts, 'v', strips)
 
-    # new/robust fits
+    # Robust fits (existing RANSAC method - also uses 3-tuple points)
     lt_rob = robust_fit_line(top_pts, 'h', residual_thresh)
     lb_rob = robust_fit_line(bot_pts, 'h', residual_thresh)
     ll_rob = robust_fit_line(left_pts, 'v', residual_thresh)
     lr_rob = robust_fit_line(right_pts, 'v', residual_thresh)
 
-
+    # ========== CANDIDATE SELECTION ==========
     candidates = []
 
-    # Candidate 1: simple
+    # Candidate 1: weighted simple
     if all([lt_simple, lb_simple, ll_simple, lr_simple]):
         px_simple = [
             intersect(lt_simple, ll_simple),
@@ -419,9 +401,7 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
             intersect(lb_simple, lr_simple),
             intersect(lb_simple, ll_simple),
         ]
-
         score_simple = score_candidate(px_simple, world_coords, w, h, expected_ppm)
-
         candidates.append(("simple", px_simple, score_simple))
 
     # Candidate 2: robust
@@ -432,18 +412,14 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
             intersect(lb_rob, lr_rob),
             intersect(lb_rob, ll_rob),
         ]
-
         score_rob = score_candidate(px_rob, world_coords, w, h, expected_ppm)
-
         candidates.append(("robust", px_rob, score_rob))
 
     if not candidates:
         raise ValueError("Detection failed (no valid rectangle candidates)")
 
-    #best_name, pixel_coords, best_score = min(candidates, key=lambda x: x[2])
-
-    max_allowed_shift = 0.001 * max(w, h)  # tune if needed
-
+    # Choose best candidate
+    max_allowed_shift = 0.001 * max(w, h)
     shift = None
 
     if all([lt_simple, lb_simple, ll_simple, lr_simple]) and all([lt_rob, lb_rob, ll_rob, lr_rob]):
@@ -453,15 +429,21 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
         best_name, pixel_coords, best_score = "simple", px_simple, score_simple
     else:
         best_name, pixel_coords, best_score = min(
-            [("simple", px_simple, score_simple), ("robust", px_rob, score_rob)],
+            candidates,
             key=lambda x: x[2],
         )
     
+    # Extract just (x, y) for debug visualization
+    debug_top_pts = [(p[0], p[1]) for p in top_pts]
+    debug_bot_pts = [(p[0], p[1]) for p in bot_pts]
+    debug_left_pts = [(p[0], p[1]) for p in left_pts]
+    debug_right_pts = [(p[0], p[1]) for p in right_pts]
+    
     debug_data = {
-        "top_pts": top_pts,
-        "bot_pts": bot_pts,
-        "left_pts": left_pts,
-        "right_pts": right_pts,
+        "top_pts": debug_top_pts,
+        "bot_pts": debug_bot_pts,
+        "left_pts": debug_left_pts,
+        "right_pts": debug_right_pts,
         "best_candidate": best_name,
         "best_score": float(best_score),
     }
