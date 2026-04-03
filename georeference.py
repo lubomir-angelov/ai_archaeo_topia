@@ -11,7 +11,7 @@ import csv
 from pathlib import Path
 from tqdm import tqdm  # Progress Bar
 
-from utils import fit_line_weighted, mean_corner_distance, read_image_gray_any, read_image_color_any, robust_fit_line
+from utils import fit_line_weighted, mean_corner_distance, read_image_gray_any, read_image_color_any, robust_fit_line, average_world_dimensions, line_value
 
 # Enable GDAL Exceptions
 gdal.UseExceptions()
@@ -183,65 +183,39 @@ def load_geojson_database(json_path, name_field):
 # PART 2: PROJECTION DETECTION LOGIC
 # ==========================================
 
-def find_line_in_strip_projection(strip, orientation, max_search_dist, mode='first_after_gap'):
-    """
-    Sums pixels along the non-scan axis. 
-    Finds the frame line using projection profiles.
-    
-    mode='first_after_gap': Standard. Finds first strong line AFTER a large gap.
-    """
-    axis = 1 if orientation == 'h' else 0
-    
-    # Invert image (Black lines become bright peaks)
+def find_line_candidates_in_strip(strip, orientation, max_search_dist):
+    axis = 1 if orientation == "h" else 0
     prof = np.sum(255 - strip, axis=axis)
     max_val = np.max(prof)
 
+    if max_val <= 0:
+        return []
+
     profile_len = len(prof)
     cluster_join_dist = max(2, int(profile_len * 0.01))
-    large_gap_threshold = max(8, int(profile_len * 0.04))
-    
-    # Threshold to identify potential lines (35% of max intensity)
-    threshold = max_val * 0.35 
-    peaks = np.where(prof > threshold)[0]
-    
-    if len(peaks) == 0: 
-        return None
+    threshold = max_val * 0.35
 
-    # Cluster peaks (group adjacent pixels into lines)
+    peaks = np.where(prof > threshold)[0]
+    if len(peaks) == 0:
+        return []
+
     clusters = []
     curr = [peaks[0]]
     for i in range(1, len(peaks)):
-        #if peaks[i] <= peaks[i-1] + 5:
         if peaks[i] <= peaks[i - 1] + cluster_join_dist:
             curr.append(peaks[i])
         else:
-            clusters.append(int(np.mean(curr)))
+            center = int(np.mean(curr))
+            strength = float(np.sum(prof[curr]))
+            clusters.append((center, strength))
             curr = [peaks[i]]
-    clusters.append(int(np.mean(curr)))
-    
-    # Filter very small clusters (noise)
-    valid_clusters = [c for c in clusters if c > 5] 
-    if not valid_clusters: 
-        return None
 
-    #LARGE_GAP_THRESHOLD = 25
-    
-    # STANDARD LOGIC: Jump over the Outer Frame
-    for i in range(1, len(valid_clusters)):
-        current_line = valid_clusters[i]
-        prev_line = valid_clusters[i-1]
-        
-        dist_from_start = current_line - valid_clusters[0]
-        if dist_from_start > max_search_dist:
-            break
-            
-        gap = current_line - prev_line
-        
-        #if gap > LARGE_GAP_THRESHOLD:
-        if gap > large_gap_threshold:
-            return current_line
-    
-    return valid_clusters[-1] if valid_clusters else None
+    center = int(np.mean(curr))
+    strength = float(np.sum(prof[curr]))
+    clusters.append((center, strength))
+
+    return [(pos, strength) for pos, strength in clusters if pos <= max_search_dist]
+
 
 def fit_line_simple(points, orientation):
     if len(points) < 3: 
@@ -280,26 +254,23 @@ def intersect(lh, lv):
     y = m1 * x + c1
     return (x, y)
 
-
 def detect_frame_projection(image_path, world_coords, expected_ppm):
-    
     img = read_image_gray_any(image_path)
-
     h, w = img.shape
-    
+
     # --- SCAN DEPTHS ---
     margin_x = int(w * 0.15)
     margin_x_right = int(w * 0.20)
     margin_y = int(h * 0.10)
     margin_y_bottom = int(h * 0.30)
-    
+
     # --- SEARCH LIMITS ---
-    limit_top = int(h * 0.025)   
-    limit_left = int(w * 0.05)   
-    limit_right = int(w * 0.08)   
-    limit_bot = int(h * 0.12)     
-    
-    # --- CLEANING KERNELS (relative to image size) ---
+    limit_top = int(h * 0.025)
+    limit_left = int(w * 0.05)
+    limit_right = int(w * 0.08)
+    limit_bot = int(h * 0.12)
+
+    # --- CLEANING KERNELS ---
     clean_kernel_h_strong = cv2.getStructuringElement(
         cv2.MORPH_RECT, (max(15, w // 120), 1)
     )
@@ -310,105 +281,207 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
         cv2.MORPH_RECT, (1, max(5, h // 500))
     )
 
-    # Adaptive strip count (height-dependent)
+    # Adaptive strip count
     strips = max(20, h // 200)
-    cw, ch = w // strips, h // strips
-    
+    cw = max(1, w // strips)
+    ch = max(1, h // strips)
+    edge_strip_count = max(5, strips // 4)
+
     top_pts, bot_pts, left_pts, right_pts = [], [], [], []
 
-    mask_zone_size = 0
-    mask_zone_size_r = 0
-    
+    # ------------------------------------------------------------------
+    # PASS 1: detect TOP and LEFT first
+    # ------------------------------------------------------------------
+
     # ========== TOP ==========
     for i in range(strips):
-        strip_t = img[0:margin_y, i*cw:(i+1)*cw]
-        y = find_line_in_strip_projection(strip_t, 'h', limit_top)
-        if y is not None: 
-            top_pts.append((i*cw + cw//2, y, i))  # (x, y, strip_index)
+        x0 = i * cw
+        x1 = w if i == strips - 1 else (i + 1) * cw
+        x_center = (x0 + x1) // 2
 
-    # ========== BOTTOM ==========
-    for i in range(strips):
-        if i < 5 or i >= 15:
-            raw_strip = img[h-margin_y_bottom:h, i*cw:(i+1)*cw]
-            
-            # Strong Clean (Remove Dashed Lines)
-            inv = cv2.bitwise_not(raw_strip)
-            cleaned = cv2.morphologyEx(inv, cv2.MORPH_OPEN, clean_kernel_h_strong)
-            strip_b_clean = cv2.bitwise_not(cleaned)
-            strip_b = np.flipud(strip_b_clean) 
-            
-            # Mask Legend
-            # mask_zone_size = int(h * 0.055) 
-            if mask_zone_size < strip_b.shape[0]:
-                strip_b[0:mask_zone_size, :] = 255 
-            
-            y_loc = find_line_in_strip_projection(strip_b, 'h', limit_bot)
-            if y_loc is not None: 
-                bot_pts.append((i*cw + cw//2, h - 1 - y_loc, i))  # (x, y, strip_index)
+        strip_t = img[0:margin_y, x0:x1]
+        y = find_line_in_strip_projection(strip_t, "h", limit_top)
+        if y is not None:
+            top_pts.append((x_center, y, i))
 
     # ========== LEFT ==========
     for i in range(strips):
-        raw_strip_l = img[i*ch:(i+1)*ch, 0:margin_x]
-        
-        # Strong Clean (Remove Dashed Lines)
+        y0 = i * ch
+        y1 = h if i == strips - 1 else (i + 1) * ch
+        y_center = (y0 + y1) // 2
+
+        raw_strip_l = img[y0:y1, 0:margin_x]
+
         inv_l = cv2.bitwise_not(raw_strip_l)
         cleaned_l = cv2.morphologyEx(inv_l, cv2.MORPH_OPEN, clean_kernel_v_strong)
         strip_l_clean = cv2.bitwise_not(cleaned_l)
-        
-        x = find_line_in_strip_projection(strip_l_clean, 'v', limit_left)
-        if x is not None: 
-            left_pts.append((x, i*ch + ch//2, i))  # (x, y, strip_index)
+
+        x = find_line_in_strip_projection(strip_l_clean, "v", limit_left)
+        if x is not None:
+            left_pts.append((x, y_center, i))
+
+    residual_thresh = max(8.0, 0.0015 * max(h, w))
+
+    # Anchor lines: top/left first
+    lt_anchor = fit_line_weighted(top_pts, "h", strips)
+    if lt_anchor is None:
+        lt_anchor = robust_fit_line(top_pts, "h", residual_thresh)
+
+    ll_anchor = fit_line_weighted(left_pts, "v", strips)
+    if ll_anchor is None:
+        ll_anchor = robust_fit_line(left_pts, "v", residual_thresh)
+
+    if lt_anchor is None or ll_anchor is None:
+        raise ValueError("Failed to fit top/left anchor lines")
+
+    if expected_ppm is None or expected_ppm <= 0:
+        raise ValueError("expected_ppm must be provided for prior-guided bottom/right detection")
+
+    world_w, world_h = average_world_dimensions(world_coords)
+    expected_px_w = expected_ppm * world_w
+    expected_px_h = expected_ppm * world_h
+
+    # Tolerances for selecting candidates near the predicted bottom/right
+    bottom_tol = max(40, int(0.02 * h))
+    right_tol = max(40, int(0.02 * w))
+
+    # ------------------------------------------------------------------
+    # PASS 2: detect BOTTOM and RIGHT using prior from top/left + scale
+    # ------------------------------------------------------------------
+
+    # ========== BOTTOM ==========
+    for i in range(strips):
+        if not (i < edge_strip_count or i >= strips - edge_strip_count):
+            continue
+
+        x0 = i * cw
+        x1 = w if i == strips - 1 else (i + 1) * cw
+        x_center = (x0 + x1) // 2
+
+        raw_strip = img[h - margin_y_bottom:h, x0:x1]
+
+        inv = cv2.bitwise_not(raw_strip)
+        cleaned = cv2.morphologyEx(inv, cv2.MORPH_OPEN, clean_kernel_h_strong)
+        strip_b_clean = cv2.bitwise_not(cleaned)
+        strip_b = np.flipud(strip_b_clean)
+
+        candidates = find_line_candidates_in_strip(strip_b, "h", limit_bot)
+        if not candidates:
+            continue
+
+        expected_bottom_y = line_value(lt_anchor, x_center) + expected_px_h
+
+        best = None
+        best_dev = float("inf")
+        fallback = None
+        fallback_dev = float("inf")
+
+        for y_loc, _strength in candidates:
+            y_global = h - 1 - y_loc
+            dev = abs(y_global - expected_bottom_y)
+
+            if dev < fallback_dev:
+                fallback = (x_center, y_global, i)
+                fallback_dev = dev
+
+            if dev <= bottom_tol and dev < best_dev:
+                best = (x_center, y_global, i)
+                best_dev = dev
+
+        if best is None and fallback is not None and fallback_dev <= 2.5 * bottom_tol:
+            best = fallback
+
+        if best is not None:
+            bot_pts.append(best)
 
     # ========== RIGHT ==========
     for i in range(strips):
-        raw_strip_r = img[i*ch:(i+1)*ch, w-margin_x_right:w]
-        
-        # Weak Clean (Keep frame safe)
+        y0 = i * ch
+        y1 = h if i == strips - 1 else (i + 1) * ch
+        y_center = (y0 + y1) // 2
+
+        raw_strip_r = img[y0:y1, w - margin_x_right:w]
+
         inv_r = cv2.bitwise_not(raw_strip_r)
         cleaned_r = cv2.morphologyEx(inv_r, cv2.MORPH_OPEN, clean_kernel_v_weak)
         strip_r_clean = cv2.bitwise_not(cleaned_r)
-        strip_r = np.fliplr(strip_r_clean) 
-        
-        # Mask Outer Frame
-        # mask_zone_size_r = int(w * 0.035) 
-        if mask_zone_size_r < strip_r.shape[1]:
-            strip_r[:, 0:mask_zone_size_r] = 255 
-            
-        x_loc = find_line_in_strip_projection(strip_r, 'v', limit_right)
-        if x_loc is not None:
-            right_pts.append((w - 1 - x_loc, i*ch + ch//2, i))  # (x, y, strip_index)
+        strip_r = np.fliplr(strip_r_clean)
 
-    # ========== LINE FITTING ==========
-    residual_thresh = max(8.0, 0.0015 * max(h, w))
+        candidates = find_line_candidates_in_strip(strip_r, "v", limit_right)
+        if not candidates:
+            continue
 
-    # Weighted fits (using strip position)
-    lt_simple = fit_line_weighted(top_pts, 'h', strips)
-    lb_simple = fit_line_weighted(bot_pts, 'h', strips)
-    ll_simple = fit_line_weighted(left_pts, 'v', strips)
-    lr_simple = fit_line_weighted(right_pts, 'v', strips)
+        expected_right_x = line_value(ll_anchor, y_center) + expected_px_w
 
-    # Robust fits (existing RANSAC method - also uses 3-tuple points)
-    lt_rob = robust_fit_line(top_pts, 'h', residual_thresh)
-    lb_rob = robust_fit_line(bot_pts, 'h', residual_thresh)
-    ll_rob = robust_fit_line(left_pts, 'v', residual_thresh)
-    lr_rob = robust_fit_line(right_pts, 'v', residual_thresh)
+        best = None
+        best_dev = float("inf")
+        fallback = None
+        fallback_dev = float("inf")
 
-    # ========== CANDIDATE SELECTION ==========
+        for x_loc, _strength in candidates:
+            x_global = w - 1 - x_loc
+            dev = abs(x_global - expected_right_x)
+
+            if dev < fallback_dev:
+                fallback = (x_global, y_center, i)
+                fallback_dev = dev
+
+            if dev <= right_tol and dev < best_dev:
+                best = (x_global, y_center, i)
+                best_dev = dev
+
+        if best is None and fallback is not None and fallback_dev <= 2.5 * right_tol:
+            best = fallback
+
+        if best is not None:
+            right_pts.append(best)
+
+    # ------------------------------------------------------------------
+    # FINAL LINE FITS
+    # ------------------------------------------------------------------
+    lt_simple = fit_line_weighted(top_pts, "h", strips)
+    ll_simple = fit_line_weighted(left_pts, "v", strips)
+    lb_simple = fit_line_weighted(bot_pts, "h", strips)
+    lr_simple = fit_line_weighted(right_pts, "v", strips)
+
+    lt_rob = robust_fit_line(top_pts, "h", residual_thresh)
+    ll_rob = robust_fit_line(left_pts, "v", residual_thresh)
+    lb_rob = robust_fit_line(bot_pts, "h", residual_thresh)
+    lr_rob = robust_fit_line(right_pts, "v", residual_thresh)
+
+    # ------------------------------------------------------------------
+    # CANDIDATES
+    # ------------------------------------------------------------------
     candidates = []
 
-    # Candidate 1: weighted simple
-    if all([lt_simple, lb_simple, ll_simple, lr_simple]):
-        px_simple = [
-            intersect(lt_simple, ll_simple),
-            intersect(lt_simple, lr_simple),
-            intersect(lb_simple, lr_simple),
-            intersect(lb_simple, ll_simple),
+    # Best practical combo: anchor top/left + robust bottom/right
+    if all([lt_anchor, ll_anchor, lb_rob, lr_rob]):
+        px_prior_robust = [
+            intersect(lt_anchor, ll_anchor),
+            intersect(lt_anchor, lr_rob),
+            intersect(lb_rob, lr_rob),
+            intersect(lb_rob, ll_anchor),
         ]
-        score_simple = score_candidate(px_simple, world_coords, w, h, expected_ppm)
-        candidates.append(("simple", px_simple, score_simple))
+        score_prior_robust = score_candidate(
+            px_prior_robust, world_coords, w, h, expected_ppm
+        )
+        candidates.append(("prior_robust", px_prior_robust, score_prior_robust))
 
-    # Candidate 2: robust
-    if all([lt_rob, lb_rob, ll_rob, lr_rob]):
+    # Anchor top/left + weighted bottom/right
+    if all([lt_anchor, ll_anchor, lb_simple, lr_simple]):
+        px_prior_simple = [
+            intersect(lt_anchor, ll_anchor),
+            intersect(lt_anchor, lr_simple),
+            intersect(lb_simple, lr_simple),
+            intersect(lb_simple, ll_anchor),
+        ]
+        score_prior_simple = score_candidate(
+            px_prior_simple, world_coords, w, h, expected_ppm
+        )
+        candidates.append(("prior_simple", px_prior_simple, score_prior_simple))
+
+    # Full robust fallback
+    if all([lt_rob, ll_rob, lb_rob, lr_rob]):
         px_rob = [
             intersect(lt_rob, ll_rob),
             intersect(lt_rob, lr_rob),
@@ -421,32 +494,13 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
     if not candidates:
         raise ValueError("Detection failed (no valid rectangle candidates)")
 
-    # Choose best candidate
-    max_allowed_shift = 0.001 * max(w, h)
-    shift = None
+    best_name, pixel_coords, best_score = min(candidates, key=lambda x: x[2])
 
-    if all([lt_simple, lb_simple, ll_simple, lr_simple]) and all([lt_rob, lb_rob, ll_rob, lr_rob]):
-        shift = mean_corner_distance(px_simple, px_rob)
-
-    if shift is not None and shift > max_allowed_shift and score_rob >= score_simple:
-        best_name, pixel_coords, best_score = "simple", px_simple, score_simple
-    else:
-        best_name, pixel_coords, best_score = min(
-            candidates,
-            key=lambda x: x[2],
-        )
-    
-    # Extract just (x, y) for debug visualization
-    debug_top_pts = [(p[0], p[1]) for p in top_pts]
-    debug_bot_pts = [(p[0], p[1]) for p in bot_pts]
-    debug_left_pts = [(p[0], p[1]) for p in left_pts]
-    debug_right_pts = [(p[0], p[1]) for p in right_pts]
-    
     debug_data = {
-        "top_pts": debug_top_pts,
-        "bot_pts": debug_bot_pts,
-        "left_pts": debug_left_pts,
-        "right_pts": debug_right_pts,
+        "top_pts": [(p[0], p[1]) for p in top_pts],
+        "bot_pts": [(p[0], p[1]) for p in bot_pts],
+        "left_pts": [(p[0], p[1]) for p in left_pts],
+        "right_pts": [(p[0], p[1]) for p in right_pts],
         "best_candidate": best_name,
         "best_score": float(best_score),
     }

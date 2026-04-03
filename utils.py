@@ -357,3 +357,19 @@ def fit_line_weighted(points, orientation, total_strips):
         m, c = np.polyfit(clean_pts[:, 1], clean_pts[:, 0], 1, w=clean_weights)
     
     return m, c
+
+def average_world_dimensions(world_coords):
+    pts = np.asarray(world_coords, dtype=np.float32)
+
+    w_top = np.linalg.norm(pts[1] - pts[0])
+    w_bot = np.linalg.norm(pts[2] - pts[3])
+    h_left = np.linalg.norm(pts[3] - pts[0])
+    h_right = np.linalg.norm(pts[2] - pts[1])
+
+    return (w_top + w_bot) / 2.0, (h_left + h_right) / 2.0
+
+
+def line_value(line, t):
+    """Evaluate a fitted line at x=t for horizontal lines or y=t for vertical lines."""
+    m, c = line
+    return float(m * t + c)
