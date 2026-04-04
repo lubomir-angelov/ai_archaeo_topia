@@ -349,7 +349,7 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
             # Mask Legend
             #mask_zone_size = int(h * 0.055) # correct images are correct; failing are too far inward
             #mask_zone_size = int(h * 0.015) # correct images are now outward; failing are closer to correct
-            mask_zone_size = int(h * 0.025)
+            mask_zone_size = int(h * 0.03)
             if mask_zone_size < strip_b.shape[0]:
                 strip_b[0:mask_zone_size, :] = 255 
             
