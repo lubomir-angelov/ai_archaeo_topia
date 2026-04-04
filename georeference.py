@@ -378,6 +378,12 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
 
     # Anchor lines: top/left first
     lt_anchor = fit_line_weighted(top_pts, "h", strips)
+
+    print(
+       f"Anchor counts for {os.path.basename(image_path)}: "
+       f"top={len(top_pts)} left={len(left_pts)}"
+    )
+
     if lt_anchor is None:
         lt_anchor = robust_fit_line(top_pts, "h", residual_thresh)
 
@@ -475,18 +481,18 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
         f"Seed counts for {os.path.basename(image_path)}: "
         f"bottom={len(bot_seed_pts)} right={len(right_seed_pts)}"
     )
-    
+
     bot_seed_pts = validate_points(bot_seed_pts, "bot_seed_pts")
     right_seed_pts = validate_points(right_seed_pts, "right_seed_pts")
-    
+
     lb_seed = robust_fit_line(bot_seed_pts, "h", residual_thresh)
     if lb_seed is None:
         lb_seed = fit_line_weighted(bot_seed_pts, "h", strips)
-    
+
     lr_seed = robust_fit_line(right_seed_pts, "v", residual_thresh)
     if lr_seed is None:
         lr_seed = fit_line_weighted(right_seed_pts, "v", strips)
-    
+
     if lb_seed is None or lr_seed is None:
         raise ValueError(
             f"Failed to fit bottom/right seed lines "
