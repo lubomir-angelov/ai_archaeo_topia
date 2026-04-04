@@ -361,11 +361,16 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
     bottom_tol = max(40, int(0.02 * h))
     right_tol = max(40, int(0.02 * w))
 
+        # ------------------------------------------------------------------
+    # PASS 2A: seed BOTTOM and RIGHT using top/left + expected scale
     # ------------------------------------------------------------------
-    # PASS 2: detect BOTTOM and RIGHT using prior from top/left + scale
-    # ------------------------------------------------------------------
+    bot_seed_pts = []
+    right_seed_pts = []
 
-    # ========== BOTTOM ==========
+    seed_bottom_tol = max(120, int(0.05 * h))
+    seed_right_tol = max(120, int(0.05 * w))
+
+    # Seed bottom from edge strips only
     for i in range(strips):
         if not (i < edge_strip_count or i >= strips - edge_strip_count):
             continue
@@ -375,7 +380,6 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
         x_center = (x0 + x1) // 2
 
         raw_strip = img[h - margin_y_bottom:h, x0:x1]
-
         inv = cv2.bitwise_not(raw_strip)
         cleaned = cv2.morphologyEx(inv, cv2.MORPH_OPEN, clean_kernel_h_strong)
         strip_b_clean = cv2.bitwise_not(cleaned)
@@ -387,37 +391,22 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
 
         expected_bottom_y = line_value(lt_anchor, x_center) + expected_px_h
 
-        best = None
-        best_dev = float("inf")
-        fallback = None
-        fallback_dev = float("inf")
+        y_global = select_candidate_near_target(
+            candidates=candidates,
+            to_global_value=lambda y_loc: h - 1 - y_loc,
+            target_value=expected_bottom_y,
+            max_dev=seed_bottom_tol,
+        )
+        if y_global is not None:
+            bot_seed_pts.append((x_center, y_global, i))
 
-        for y_loc, _strength in candidates:
-            y_global = h - 1 - y_loc
-            dev = abs(y_global - expected_bottom_y)
-
-            if dev < fallback_dev:
-                fallback = (x_center, y_global, i)
-                fallback_dev = dev
-
-            if dev <= bottom_tol and dev < best_dev:
-                best = (x_center, y_global, i)
-                best_dev = dev
-
-        if best is None and fallback is not None and fallback_dev <= 2.5 * bottom_tol:
-            best = fallback
-
-        if best is not None:
-            bot_pts.append(best)
-
-    # ========== RIGHT ==========
+    # Seed right from all strips
     for i in range(strips):
         y0 = i * ch
         y1 = h if i == strips - 1 else (i + 1) * ch
         y_center = (y0 + y1) // 2
 
         raw_strip_r = img[y0:y1, w - margin_x_right:w]
-
         inv_r = cv2.bitwise_not(raw_strip_r)
         cleaned_r = cv2.morphologyEx(inv_r, cv2.MORPH_OPEN, clean_kernel_v_weak)
         strip_r_clean = cv2.bitwise_not(cleaned_r)
@@ -429,28 +418,86 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
 
         expected_right_x = line_value(ll_anchor, y_center) + expected_px_w
 
-        best = None
-        best_dev = float("inf")
-        fallback = None
-        fallback_dev = float("inf")
+        x_global = select_candidate_near_target(
+            candidates=candidates,
+            to_global_value=lambda x_loc: w - 1 - x_loc,
+            target_value=expected_right_x,
+            max_dev=seed_right_tol,
+        )
+        if x_global is not None:
+            right_seed_pts.append((x_global, y_center, i))
 
-        for x_loc, _strength in candidates:
-            x_global = w - 1 - x_loc
-            dev = abs(x_global - expected_right_x)
+    lb_seed = robust_fit_line(bot_seed_pts, "h", residual_thresh)
+    lr_seed = robust_fit_line(right_seed_pts, "v", residual_thresh)
 
-            if dev < fallback_dev:
-                fallback = (x_global, y_center, i)
-                fallback_dev = dev
+    if lb_seed is None or lr_seed is None:
+        raise ValueError("Failed to fit bottom/right seed lines")
 
-            if dev <= right_tol and dev < best_dev:
-                best = (x_global, y_center, i)
-                best_dev = dev
+    # ------------------------------------------------------------------
+    # PASS 2B: refine BOTTOM and RIGHT using the seed lines, not fixed ppm
+    # ------------------------------------------------------------------
+    bot_pts = []
+    right_pts = []
 
-        if best is None and fallback is not None and fallback_dev <= 2.5 * right_tol:
-            best = fallback
+    refine_bottom_tol = max(40, int(0.015 * h))
+    refine_right_tol = max(40, int(0.015 * w))
 
-        if best is not None:
-            right_pts.append(best)
+    # Refine bottom from ALL strips now that we have a seed line
+    for i in range(strips):
+        x0 = i * cw
+        x1 = w if i == strips - 1 else (i + 1) * cw
+        x_center = (x0 + x1) // 2
+
+        raw_strip = img[h - margin_y_bottom:h, x0:x1]
+        inv = cv2.bitwise_not(raw_strip)
+        cleaned = cv2.morphologyEx(inv, cv2.MORPH_OPEN, clean_kernel_h_strong)
+        strip_b_clean = cv2.bitwise_not(cleaned)
+        strip_b = np.flipud(strip_b_clean)
+
+        candidates = find_line_candidates_in_strip(strip_b, "h", limit_bot)
+        if not candidates:
+            continue
+
+        target_bottom_y = line_value(lb_seed, x_center)
+
+        y_global = select_candidate_near_target(
+            candidates=candidates,
+            to_global_value=lambda y_loc: h - 1 - y_loc,
+            target_value=target_bottom_y,
+            max_dev=refine_bottom_tol,
+        )
+        if y_global is not None:
+            bot_pts.append((x_center, y_global, i))
+
+    # Refine right from ALL strips using the right seed line
+    for i in range(strips):
+        y0 = i * ch
+        y1 = h if i == strips - 1 else (i + 1) * ch
+        y_center = (y0 + y1) // 2
+
+        raw_strip_r = img[y0:y1, w - margin_x_right:w]
+        inv_r = cv2.bitwise_not(raw_strip_r)
+        cleaned_r = cv2.morphologyEx(inv_r, cv2.MORPH_OPEN, clean_kernel_v_weak)
+        strip_r_clean = cv2.bitwise_not(cleaned_r)
+        strip_r = np.fliplr(strip_r_clean)
+
+        candidates = find_line_candidates_in_strip(strip_r, "v", limit_right)
+        if not candidates:
+            continue
+
+        target_right_x = line_value(lr_seed, y_center)
+
+        x_global = select_candidate_near_target(
+            candidates=candidates,
+            to_global_value=lambda x_loc: w - 1 - x_loc,
+            target_value=target_right_x,
+            max_dev=refine_right_tol,
+        )
+        if x_global is not None:
+            right_pts.append((x_global, y_center, i))
+
+    if len(bot_pts) < 3 or len(right_pts) < 3:
+        raise ValueError("Refined bottom/right detection produced too few points")
 
     # ------------------------------------------------------------------
     # FINAL LINE FITS
