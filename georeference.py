@@ -313,14 +313,14 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
     h, w = img.shape
 
     # --- SCAN DEPTHS ---
-    margin_x = int(w * 0.15)
-    margin_x_right = int(w * 0.20)
+    margin_x = int(w * 0.18)
+    margin_y = int(h * 0.12)
     margin_y = int(h * 0.10)
     margin_y_bottom = int(h * 0.30)
 
     # --- SEARCH LIMITS ---
-    limit_top = int(h * 0.025)
-    limit_left = int(w * 0.05)
+    limit_top = int(h * 0.04)
+    limit_left = int(w * 0.07)
     limit_right = int(w * 0.08)
     limit_bot = int(h * 0.12)
 
