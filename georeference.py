@@ -320,8 +320,8 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
 
     # --- SCAN DEPTHS ---
     margin_x = int(w * 0.18)
+    margin_x_right = int(w * 0.20)
     margin_y = int(h * 0.12)
-    margin_y = int(h * 0.10)
     margin_y_bottom = int(h * 0.30)
 
     # --- SEARCH LIMITS ---
