@@ -256,14 +256,15 @@ def intersect(lh, lv):
 
 
 def select_candidate_near_target(candidates, to_global_value, target_value, max_dev):
-    """Select the candidate whose global coordinate is closest to target_value."""
+    """Return the selected global coordinate as a scalar float, or None."""
     best_value = None
     best_dev = float("inf")
 
     for loc, _strength in candidates:
-        value = to_global_value(loc)
-        dev = abs(value - target_value)
-        if dev <= max_dev and dev < best_dev:
+        value = float(to_global_value(loc))
+        dev = abs(value - float(target_value))
+
+        if dev <= float(max_dev) and dev < best_dev:
             best_value = value
             best_dev = dev
 
