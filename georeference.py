@@ -262,20 +262,39 @@ def intersect(lh, lv):
     return (x, y)
 
 
-def select_candidate_near_target(candidates, to_global_value, target_value, max_dev):
-    """Return the selected global coordinate as a scalar float, or None."""
+def select_candidate_near_target(
+    candidates,
+    to_global_value,
+    target_value,
+    max_dev,
+    allow_fallback=False,
+):
+    """Select the candidate whose global coordinate is closest to target_value."""
     best_value = None
     best_dev = float("inf")
+
+    fallback_value = None
+    fallback_dev = float("inf")
 
     for loc, _strength in candidates:
         value = float(to_global_value(loc))
         dev = abs(value - float(target_value))
 
+        if dev < fallback_dev:
+            fallback_value = value
+            fallback_dev = dev
+
         if dev <= float(max_dev) and dev < best_dev:
             best_value = value
             best_dev = dev
 
-    return best_value
+    if best_value is not None:
+        return best_value
+
+    if allow_fallback:
+        return fallback_value
+
+    return None
 
 
 def detect_frame_projection(image_path, world_coords, expected_ppm):
