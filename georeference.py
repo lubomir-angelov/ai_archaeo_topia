@@ -396,7 +396,7 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
         #mask_zone_size_r = int(w * 0.035) 
         #mask_zone_size_r = int(w * 0.008)
         #mask_zone_size_r = int(w * 0.015)
-        mask_zone_size_r = int(w * 0.012)
+        mask_zone_size_r = int(w * 0.011)
         if mask_zone_size_r < strip_r.shape[1]:
             strip_r[:, 0:mask_zone_size_r] = 255 
             
