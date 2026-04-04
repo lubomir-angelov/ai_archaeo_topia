@@ -185,7 +185,13 @@ def load_geojson_database(json_path, name_field):
 # PART 2: PROJECTION DETECTION LOGIC
 # ==========================================
 
-def find_line_candidates_in_strip(strip, orientation, max_search_dist):
+def find_line_candidates_in_strip(
+    strip,
+    orientation,
+    max_search_dist,
+    threshold_ratio=0.35,
+    cluster_join_ratio=0.01,
+):
     axis = 1 if orientation == "h" else 0
     prof = np.sum(255 - strip, axis=axis)
     max_val = np.max(prof)
@@ -194,8 +200,8 @@ def find_line_candidates_in_strip(strip, orientation, max_search_dist):
         return []
 
     profile_len = len(prof)
-    cluster_join_dist = max(2, int(profile_len * 0.01))
-    threshold = max_val * 0.35
+    cluster_join_dist = max(2, int(profile_len * cluster_join_ratio))
+    threshold = max_val * threshold_ratio
 
     peaks = np.where(prof > threshold)[0]
     if len(peaks) == 0:
