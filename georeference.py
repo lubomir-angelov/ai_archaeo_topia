@@ -471,11 +471,27 @@ def detect_frame_projection(image_path, world_coords, expected_ppm):
             #right_seed_pts.append((x_global, y_center, i))
             right_seed_pts.append((float(x_global), float(y_center), int(i)))
 
+    print(
+        f"Seed counts for {os.path.basename(image_path)}: "
+        f"bottom={len(bot_seed_pts)} right={len(right_seed_pts)}"
+    )
+    
+    bot_seed_pts = validate_points(bot_seed_pts, "bot_seed_pts")
+    right_seed_pts = validate_points(right_seed_pts, "right_seed_pts")
+    
     lb_seed = robust_fit_line(bot_seed_pts, "h", residual_thresh)
+    if lb_seed is None:
+        lb_seed = fit_line_weighted(bot_seed_pts, "h", strips)
+    
     lr_seed = robust_fit_line(right_seed_pts, "v", residual_thresh)
-
+    if lr_seed is None:
+        lr_seed = fit_line_weighted(right_seed_pts, "v", strips)
+    
     if lb_seed is None or lr_seed is None:
-        raise ValueError("Failed to fit bottom/right seed lines")
+        raise ValueError(
+            f"Failed to fit bottom/right seed lines "
+            f"(bottom seeds={len(bot_seed_pts)}, right seeds={len(right_seed_pts)})"
+        )
 
     # ------------------------------------------------------------------
     # PASS 2B: refine BOTTOM and RIGHT using the seed lines, not fixed ppm
