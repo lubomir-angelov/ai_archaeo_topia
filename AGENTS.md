@@ -270,50 +270,6 @@ resets, or volume deletion without explicit approval.
 - Document required environment variables.
 - Do not make `make test`, `make lint`, or `make check` depend on destructive setup.
 
-## CCE / Code Context Engine
-
-This project may use Code Context Engine for code retrieval and cross-session
-memory.
-
-When CCE tools are available, prefer `context_search` over reading many files
-directly for exploratory work.
-
-Use `context_search` for:
-
-- Understanding how a feature works.
-- Finding related functions, classes, modules, or patterns.
-- Locating architecture boundaries.
-- Answering codebase questions.
-- Preparing a targeted edit.
-
-Use supporting tools where available:
-
-- `expand_chunk` for full source around a relevant compressed result.
-- `related_context` for callers, imports, and related symbols.
-- `session_recall` for previous implementation decisions.
-- `record_decision` after meaningful architecture or implementation choices.
-- `record_code_area` after meaningful work in an important file or module.
-
-Direct file reads are still appropriate when:
-
-- The exact file is known.
-- A patch must be prepared.
-- A CCE result needs verification.
-- The user pasted a specific file or snippet.
-
-## Output style for agent responses
-
-- Be concise but complete.
-- Use direct technical language.
-- Avoid filler.
-- Avoid generic summaries.
-- Prefer actionable diagnostics.
-- State assumptions explicitly when they affect implementation.
-- When suggesting code changes, show only changed lines with about three lines of surrounding context unless a full file is explicitly requested.
-- For multiple changes in one file, show each change separately.
-- Do not echo large unchanged code blocks.
-- Use full clarity for security warnings and destructive actions.
-
 ## Security rules
 
 - Never expose secrets in logs, examples, test output, generated files, or comments.
@@ -342,3 +298,162 @@ Performance optimizations should be measured or clearly justified.
 
 Do the smallest safe thing that solves the explicit task, preserves the existing
 architecture, and keeps the archaeology/ML workflow reproducible.
+
+## CCE / Code Context Engine
+
+This project may use Code Context Engine for intelligent code retrieval and
+cross-session memory.
+
+When CCE tools are available, use them actively. CCE is the preferred way to
+understand the codebase before reading many files manually.
+
+### Searching the codebase
+
+Use `context_search` before reading files directly when exploring the codebase,
+answering questions about code, or understanding how something works.
+
+Use `context_search` for:
+
+- Answering codebase questions such as "how does X work?" or "where is Y?"
+- Exploring structure or architecture
+- Finding related functions, classes, modules, or patterns
+- Preparing targeted edits
+- Checking existing conventions before adding new code
+- Avoiding unnecessary full-file reads
+
+Use direct file reads only when:
+
+- You need to edit a specific known file.
+- You need exact complete content from a known file path.
+- You need to verify a CCE result before patching.
+- The user pasted or named a specific file.
+
+Use supporting CCE tools where available:
+
+- `expand_chunk` to inspect full source around a compressed search result.
+- `related_context` to find callers, imports, dependencies, and related symbols.
+- `session_recall` to retrieve prior decisions and implementation context.
+- `session_timeline` to inspect summarized steps from a previous session.
+- `session_event` to inspect a specific prior tool event when needed.
+
+### Cross-session memory
+
+Use CCE memory both ways: recall before important answers, record after durable
+decisions.
+
+Before answering a non-trivial repository question, call `session_recall` with
+a descriptive topic phrase.
+
+Use `session_recall` especially when:
+
+- The question touches architecture, design, naming, or conventions.
+- The user asks what, why, or how something was previously done.
+- You are about to recommend an approach the project may already have chosen or rejected.
+- You are continuing work from a previous session.
+
+Use topic phrases, not single words.
+
+Good examples:
+
+```text
+session_recall("OCR service API boundary")
+session_recall("GIS tile naming convention")
+session_recall("SAM baseline evaluation workflow")
+session_recall("FastAPI service structure")
+```
+
+Poor examples:
+
+```text
+session_recall("OCR")
+session_recall("GIS")
+session_recall("API")
+```
+
+If recall returns relevant entries, use them before re-deriving the answer.
+
+After making a non-obvious or durable decision, call `record_decision`.
+
+Use `record_decision` especially when:
+
+- Choosing one library, pattern, model, service boundary, or approach over another.
+- Resolving ambiguity in requirements.
+- Establishing a naming, layout, data, or experiment convention.
+- Rejecting an approach for a specific reason.
+- Making a decision future sessions should not re-litigate.
+
+Format:
+
+```text
+record_decision(decision="...", reason="...")
+```
+
+Keep both fields short and specific.
+
+After meaningful work in a file, call `record_code_area`.
+
+Use `record_code_area` especially when:
+
+- Adding or substantially modifying a function, class, service, route, repository, script, or workflow.
+- Tracing a non-obvious flow that future work should find quickly.
+- Creating or changing important experiment, GIS, OCR, or model-evaluation code.
+
+Format:
+
+```text
+record_code_area(file_path="...", description="...")
+```
+
+Do not record memory for trivial reads, formatting-only changes, one-off lookups,
+or noisy implementation details. Memory should contain durable signal, not an
+event log.
+
+### Drilling deeper from recall
+
+If `session_recall` returns a source session id, use drill-down tools instead of
+asking the user to repeat context.
+
+Use:
+
+```text
+session_timeline(session_id="...")
+```
+
+to inspect summarized turns from a prior session.
+
+Use:
+
+```text
+session_event(event_id=...)
+```
+
+to inspect a specific prior tool result when the summary references something
+important.
+
+Prefer these tools over re-running expensive searches or asking the user to
+re-paste context.
+
+### CCE edit workflow
+
+For non-trivial edits:
+
+1. Call `session_recall` with a relevant topic phrase.
+2. Use `context_search` to find relevant code areas.
+3. Use `expand_chunk` or direct file reads for exact code before patching.
+4. Make the smallest safe change.
+5. Run relevant checks where practical.
+6. Record durable decisions with `record_decision`.
+7. Record meaningful changed areas with `record_code_area`.
+
+### Output style for code work
+
+- Be concise but complete.
+- Use direct technical language.
+- Avoid filler, generic summaries, and repeated restatement of the task.
+- Prefer actionable diagnostics.
+- State assumptions explicitly when they affect implementation.
+- When suggesting code changes, show only changed lines with about three lines of surrounding context unless a full file is explicitly requested.
+- For multiple changes in one file, show each change separately.
+- Do not echo large unchanged code blocks.
+- Write file paths, commands, code blocks, and error messages in full.
+- Use full clarity for security warnings and destructive action confirmations.
