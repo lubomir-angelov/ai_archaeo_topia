@@ -1,3 +1,5 @@
+SHELL := /usr/bin/env bash
+
 .PHONY: help venv-dir venv activate install system-deps check-gdal setup
 .PHONY: cvat-clone cvat-init-env cvat-up cvat-up-serverless cvat-down cvat-down-volumes
 .PHONY: cvat-health cvat-ps cvat-logs cvat-superuser cvat-reset
