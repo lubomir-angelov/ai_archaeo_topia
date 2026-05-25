@@ -246,9 +246,7 @@ cvat-deploy-sam2-gpu: cvat-clone cvat-init-env cvat-install-nuctl cvat-up-server
 			--resource-limit nvidia.com/gpu=1 \
 			--env CVAT_FUNCTIONS_REDIS_HOST=cvat_redis_ondisk \
 			--env CVAT_FUNCTIONS_REDIS_PORT=6666 \
-			--trigger-http \
-			--attributes '{"network": "cvat_cvat"}' \
-			--run-arguments "--privileged"; \
+			--platform-config '{"attributes": {"network": "cvat_cvat"}}'; \
 	echo "SAM2 GPU deployed. Check with 'make cvat-functions'"
 
 cvat-undeploy-sam2: cvat-install-nuctl
