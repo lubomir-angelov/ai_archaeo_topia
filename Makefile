@@ -216,30 +216,30 @@ cvat-install-nuctl: cvat-clone
 		echo "nuctl already installed at $${nuctl_bin}"; \
 	fi
 
-cvat-deploy-sam2-cpu: cvat-clone cvat-install-nuctl
+cvat-deploy-sam2-cpu: cvat-clone cvat-init-env cvat-install-nuctl cvat-up-serverless
 	@nuctl_bin=$$(ls "$(NUCTL_DIR)"/nuctl-*-linux-amd64 2>/dev/null | head -1); \
 	if [[ -z "$${nuctl_bin}" ]]; then \
 		echo "nuctl not found. Run 'make cvat-install-nuctl' first."; \
 		exit 1; \
-	fi
-	@echo "Deploying SAM2 CPU function..."
+	fi; \
+	echo "Deploying SAM2 CPU function..."; \
 	cd "$(CVAT_DIR)" && \
-		./serverless/deploy_cpu.sh serverless/pytorch/facebookresearch/sam/nuclio
-	@echo "SAM2 deployed. Check with 'make cvat-functions'"
+		./serverless/deploy_cpu.sh serverless/pytorch/facebookresearch/sam/nuclio; \
+	echo "SAM2 deployed. Check with 'make cvat-functions'"
 
-cvat-deploy-sam2-gpu: cvat-clone cvat-install-nuctl
+cvat-deploy-sam2-gpu: cvat-clone cvat-init-env cvat-install-nuctl cvat-up-serverless
 	@nuctl_bin=$$(ls "$(NUCTL_DIR)"/nuctl-*-linux-amd64 2>/dev/null | head -1); \
 	if [[ -z "$${nuctl_bin}" ]]; then \
 		echo "nuctl not found. Run 'make cvat-install-nuctl' first."; \
 		exit 1; \
-	fi
-	@echo "Deploying SAM2 GPU function..."
-	@if [[ ! -f "$(CVAT_ENV)" ]] || ! grep -q 'CVAT_GPU_ENABLED=1' "$(CVAT_ENV)" 2>/dev/null; then \
+	fi; \
+	echo "Deploying SAM2 GPU function..."; \
+	if [[ ! -f "$(CVAT_ENV)" ]] || ! grep -q 'CVAT_GPU_ENABLED=1' "$(CVAT_ENV)" 2>/dev/null; then \
 		echo "Set CVAT_GPU_ENABLED=1 in $(CVAT_ENV) before deploying GPU functions."; \
 		exit 1; \
-	fi
+	fi; \
 	cd "$(CVAT_DIR)" && \
-		"$${nuctl_bin}" deploy --project-name cvat \
+		"$$nuctl_bin" deploy --project-name cvat \
 			--path serverless/pytorch/facebookresearch/sam/nuclio \
 			--file serverless/pytorch/facebookresearch/sam/nuclio/function-gpu.yaml \
 			--platform local \
@@ -248,25 +248,25 @@ cvat-deploy-sam2-gpu: cvat-clone cvat-install-nuctl
 			--env CVAT_FUNCTIONS_REDIS_PORT=6666 \
 			--trigger-http \
 			--attributes '{"network": "cvat_cvat"}' \
-			--run-arguments "--privileged"
-	@echo "SAM2 GPU deployed. Check with 'make cvat-functions'"
+			--run-arguments "--privileged"; \
+	echo "SAM2 GPU deployed. Check with 'make cvat-functions'"
 
 cvat-undeploy-sam2: cvat-install-nuctl
 	@nuctl_bin=$$(ls "$(NUCTL_DIR)"/nuctl-*-linux-amd64 2>/dev/null | head -1); \
 	if [[ -z "$${nuctl_bin}" ]]; then \
 		echo "nuctl not found. Run 'make cvat-install-nuctl' first."; \
 		exit 1; \
-	fi
-	@echo "Undeploying SAM2 function..."
+	fi; \
+	echo "Undeploying SAM2 function..."; \
 	cd "$(CVAT_DIR)" && \
-		"$${nuctl_bin}" delete function sam2 --project-name cvat --platform local 2>/dev/null || true
-	@echo "SAM2 function removed."
+		"$$nuctl_bin" delete function sam2 --project-name cvat --platform local 2>/dev/null || true; \
+	echo "SAM2 function removed."
 
 cvat-functions: cvat-install-nuctl
 	@nuctl_bin=$$(ls "$(NUCTL_DIR)"/nuctl-*-linux-amd64 2>/dev/null | head -1); \
 	if [[ -z "$${nuctl_bin}" ]]; then \
 		echo "nuctl not found. Run 'make cvat-install-nuctl' first."; \
 		exit 1; \
-	fi
+	fi; \
 	cd "$(CVAT_DIR)" && \
-		"$${nuctl_bin}" get functions --platform local
+		"$$nuctl_bin" get functions --platform local
