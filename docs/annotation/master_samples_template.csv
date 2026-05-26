@@ -1,0 +1,1 @@
+sample_id,annotator,image_path,sheet_25k,sheet_5k,province,position_on_25k_sheet,original_description,target_present,target_count_claimed,contains_necropolis,contains_single_mound,contains_hard_negative,relief_original,relief_normalized,difficulty,uncertainty,annotation_status,review_status,notes
