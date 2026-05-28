@@ -1,5 +1,41 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "pwd": "allow",
+      "ls *": "allow",
+      "find *": "allow",
+      "grep *": "allow",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "docker compose ps*": "allow",
+      "docker compose logs*": "allow",
+      "ruff check*": "allow",
+      "python -m pytest*": "allow",
+      "pytest*": "allow",
+      "rm *": "deny",
+      "rm -r*": "deny",
+      "rm -f*": "deny",
+      "rm -rf*": "deny",
+      "rm -fr*": "deny",
+      "sudo rm *": "deny",
+      "find * -delete*": "deny",
+      "find * -exec rm*": "deny",
+      "git clean*": "deny",
+      "git reset --hard*": "deny",
+      "git checkout -- *": "deny",
+      "docker system prune*": "deny",
+      "docker volume prune*": "deny",
+      "docker compose down -v*": "deny",
+      "make reset-db*": "deny",
+      "make clean*": "ask",
+      "make down*": "ask",
+      "sudo *": "deny"
+    },
+    "external_directory": "deny"
+  },
   "mcp": {
     "context-engine": {
       "type": "local",
