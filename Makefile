@@ -11,7 +11,7 @@ SHELL := /usr/bin/env bash
 .PHONY: lint format-check test compile
 
 VENV_DIR := $(HOME)/venvs
-VENV_NAME := ai_archaeotopia
+VENV_NAME := ai_archaeo_topia
 VENV_PATH := $(VENV_DIR)/$(VENV_NAME)
 PYTHON := python3
 PIP := $(VENV_PATH)/bin/pip
@@ -380,11 +380,12 @@ annotation-dry-run:
 		exit 1; \
 	fi
 	@set -euxo pipefail; \
-	protocol="${PROTOCOL:-annotation_protocols/archaeology_symbols_v1.yaml}"; \
+	protocol="$(PROTOCOL)"; \
+	if [ -z "$$protocol" ]; then protocol="annotation_protocols/archaeology_symbols_v1.yaml"; fi; \
 	$(PYTHON) -c "\
 	import json, sys; \
 	from cvat_sam2_mcp.annotation_runner import start_run; \
-	r = start_run('${protocol}', '${INPUT_DIR}', dry_run=True); \
+	r = start_run('$$protocol', '$(INPUT_DIR)', dry_run=True); \
 	print(json.dumps(r, indent=2)); \
 	"
 
@@ -394,10 +395,11 @@ annotation-run:
 		exit 1; \
 	fi
 	@set -euxo pipefail; \
-	protocol="${PROTOCOL:-annotation_protocols/archaeology_symbols_v1.yaml}"; \
+	protocol="$(PROTOCOL)"; \
+	if [ -z "$$protocol" ]; then protocol="annotation_protocols/archaeology_symbols_v1.yaml"; fi; \
 	$(PYTHON) -c "\
 	import json, sys; \
 	from cvat_sam2_mcp.annotation_runner import start_run; \
-	r = start_run('${protocol}', '${INPUT_DIR}', dry_run=False); \
+	r = start_run('$$protocol', '$(INPUT_DIR)', dry_run=False); \
 	print(json.dumps(r, indent=2)); \
 	"

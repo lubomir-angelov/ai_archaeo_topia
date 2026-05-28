@@ -131,6 +131,18 @@ class Sam2Client:
         if func_port is None:
             func_port = status.get("port", None)
 
+        # Nuclio 1.15+ puts httpPort in status (not in spec triggers)
+        if func_port is None:
+            func_port = status.get("httpPort", None)
+
+        # Parse logs for httpPort if still not found
+        if func_port is None:
+            logs = status.get("logs", [])
+            for log in logs:
+                if isinstance(log, dict) and log.get("httpPort"):
+                    func_port = log["httpPort"]
+                    break
+
         if func_port is None:
             return Sam2GenerationResult(
                 status="error",

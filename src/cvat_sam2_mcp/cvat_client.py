@@ -52,6 +52,11 @@ class CvatClient:
             self._authenticated = False
             return False
 
+    def _ensure_auth(self) -> None:
+        """Authenticate if credentials are configured and not yet authenticated."""
+        if not self._authenticated and self.username and self.password:
+            self.login()
+
     def _headers(self) -> dict[str, str]:
         hdrs = dict(self._session.headers)
         if self.org:
@@ -59,6 +64,7 @@ class CvatClient:
         return hdrs
 
     def _get(self, path: str, **kwargs: Any) -> dict[str, Any]:
+        self._ensure_auth()
         url = f"{self.base_url}{path}"
         resp = self._session.get(url, headers=self._headers(), **kwargs)
         resp.raise_for_status()
@@ -67,6 +73,7 @@ class CvatClient:
     def _post(
         self, path: str, body: dict[str, Any] | None = None, **kwargs: Any
     ) -> dict[str, Any]:
+        self._ensure_auth()
         url = f"{self.base_url}{path}"
         resp = self._session.post(url, json=body or {}, headers=self._headers(), **kwargs)
         resp.raise_for_status()
@@ -103,10 +110,29 @@ class CvatClient:
         except requests.ConnectionError:
             pass
         except requests.HTTPError:
-            result["status"] = "non-200 response"
+            # CVAT 2.x may not have /api/status; try /api/tasks as fallback
+            try:
+                resp = self._session.get(f"{self.base_url}/api/tasks", timeout=5)
+                if resp.status_code in (200, 401, 403):
+                    result["reachable"] = True
+            except requests.ConnectionError:
+                pass
+            except requests.HTTPError:
+                result["status"] = "non-200 response"
 
         if self.username and self.password:
             result["authenticated"] = self.login()
+
+        # If we have credentials, try reaching the API after auth
+        if result["authenticated"]:
+            try:
+                resp = self._session.get(f"{self.base_url}/api/tasks", timeout=5)
+                if resp.status_code in (200, 401, 403):
+                    result["reachable"] = True
+            except requests.ConnectionError:
+                pass
+            except requests.HTTPError:
+                pass
 
         # Check serverless / Nuclio reachability
         try:
@@ -126,8 +152,12 @@ class CvatClient:
     def list_projects(self) -> list[CvatProjectInfo]:
         """Return all CVAT projects with label info."""
         data = self._get("/api/projects")
+        if isinstance(data, list):
+            items = data
+        else:
+            items = data.get("results", data.get("projects", []))
         projects: list[CvatProjectInfo] = []
-        for item in data:
+        for item in items:
             labels = [
                 CvatLabel(
                     name=lbl["title"],
@@ -167,8 +197,12 @@ class CvatClient:
         if project_id is not None:
             params["project"] = project_id
         data = self._get("/api/tasks", params=params)
+        if isinstance(data, list):
+            items = data
+        else:
+            items = data.get("results", data.get("tasks", []))
         tasks: list[CvatTaskInfo] = []
-        for item in data:
+        for item in items:
             labels = [
                 CvatLabel(
                     name=lbl["title"],

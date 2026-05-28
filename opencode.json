@@ -54,9 +54,9 @@
         "cvat_sam2_mcp.server"
       ],
       "environment": {
-        "CVAT_SAM2_CVAT_BASE_URL": "http://127.0.0.1:8080",
-        "CVAT_SAM2_CVAT_USERNAME": "",
-        "CVAT_SAM2_CVAT_PASSWORD": "",
+        "CVAT_SAM2_CVAT_BASE_URL": "http://localhost:8080",
+        "CVAT_SAM2_CVAT_USERNAME": "admin",
+        "CVAT_SAM2_CVAT_PASSWORD": "admin",
         "CVAT_SAM2_NUCLIO_DASHBOARD_URL": "http://127.0.0.1:8070",
         "CVAT_SAM2_SAM2_FUNCTION_NAME": "pth-facebookresearch-sam-vit-h",
         "CVAT_SAM2_ANNOTATION_ARTIFACT_ROOT": "./artifacts/annotation_runs",
