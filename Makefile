@@ -5,6 +5,7 @@ SHELL := /usr/bin/env bash
 .PHONY: cvat-health cvat-ps cvat-logs cvat-superuser cvat-reset
 .PHONY: cvat-install-nuctl cvat-deploy-sam2-cpu cvat-deploy-sam2-gpu
 .PHONY: cvat-undeploy-sam2 cvat-functions cvat-open
+.PHONY: wsl-system-deps cce-install cce-init cce-uninstall
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeotopia
@@ -55,6 +56,12 @@ help:
 	@echo "  make cvat-deploy-sam2-gpu - Deploy SAM2 GPU function (opt-in)"
 	@echo "  make cvat-undeploy-sam2 - Remove SAM2 function"
 	@echo "  make cvat-functions     - List deployed Nuclio functions"
+	@echo ""
+	@echo "WSL / CCE:"
+	@echo "  make wsl-system-deps    - Install WSL system dependencies (build-essential, cmake, git, python3, pipx)"
+	@echo "  make cce-install        - Install Code Context Engine via pipx"
+	@echo "  make cce-init           - Initialize CCE (backs up existing opencode.json)"
+	@echo "  make cce-uninstall      - Uninstall Code Context Engine via pipx"
 
 venv-dir:
 	@mkdir -p $(VENV_DIR)
@@ -268,3 +275,46 @@ cvat-functions: cvat-install-nuctl
 	fi; \
 	cd "$(CVAT_DIR)" && \
 		"$$nuctl_bin" get functions --platform local
+
+# ---- WSL / CCE ----
+
+wsl-system-deps:
+	@echo "Installing WSL system dependencies..."
+	set -euxo pipefail; \
+	sudo apt update; \
+	sudo apt install -y \
+		build-essential \
+		cmake \
+		git \
+		python3 \
+		python3-pip \
+		pipx; \
+	python3 --version; \
+	echo "WSL system dependencies installed"
+
+cce-install:
+	@echo "Installing Code Context Engine via pipx..."
+	set -euxo pipefail; \
+	pipx ensurepath; \
+	pipx install "code-context-engine[local]"; \
+	cce --version; \
+	echo "CCE installed. Reload your shell or run: exec \"\${SHELL}\" -l"
+
+cce-init:
+	@echo "Initializing CCE in this project..."
+	@if [[ ! -f "opencode.json" ]]; then \
+		echo "opencode.json not found. Nothing to back up."; \
+	elif [[ -f "opencode.json.bak" ]]; then \
+		echo "Backing up existing opencode.json to opencode.json.bak"; \
+		cp opencode.json opencode.json.bak; \
+	else \
+		echo "Backing up existing opencode.json to opencode.json.bak"; \
+		cp opencode.json opencode.json.bak; \
+	fi
+	cce init
+
+cce-uninstall:
+	@echo "Uninstalling Code Context Engine via pipx..."
+	set -euxo pipefail; \
+	pipx uninstall code-context-engine; \
+	echo "CCE uninstalled"

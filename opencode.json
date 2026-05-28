@@ -4,10 +4,10 @@
     "context-engine": {
       "type": "local",
       "command": [
-        "/home/ubuntu/.local/bin/cce",
+        "/home/naim/.local/bin/cce",
         "serve",
         "--project-dir",
-        "/home/ubuntu/experiment/gkrp_data_portal"
+        "/home/naim/repos/ai_archaeo_topia"
       ]
     }
   },
