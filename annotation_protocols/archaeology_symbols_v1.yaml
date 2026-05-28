@@ -1,0 +1,19 @@
+protocol_version: archaeology_symbols_v1
+labels:
+  - name: archaeological_symbol_candidate
+    type: mask
+    color: "#ff0000"
+hard_negatives:
+  - text
+  - legend
+  - grid
+  - roads
+  - contour_lines
+sam2:
+  mode: candidate_masks
+  max_masks_per_image: 200
+  min_area_px: 20
+  exclude_text_regions: true
+cvat:
+  import_mode: candidate_only
+  overwrite_verified: false
