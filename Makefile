@@ -6,6 +6,9 @@ SHELL := /usr/bin/env bash
 .PHONY: cvat-install-nuctl cvat-deploy-sam2-cpu cvat-deploy-sam2-gpu
 .PHONY: cvat-undeploy-sam2 cvat-functions cvat-open
 .PHONY: wsl-system-deps cce-install cce-init cce-uninstall
+.PHONY: cvat-mcp-run cvat-mcp-health cvat-mcp-smoke
+.PHONY: annotation-dry-run annotation-run
+.PHONY: lint format-check test compile
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeotopia
@@ -56,6 +59,18 @@ help:
 	@echo "  make cvat-deploy-sam2-gpu - Deploy SAM2 GPU function (opt-in)"
 	@echo "  make cvat-undeploy-sam2 - Remove SAM2 function"
 	@echo "  make cvat-functions     - List deployed Nuclio functions"
+	@echo ""
+	@echo "MCP / Annotation pipeline:"
+	@echo "  make cvat-mcp-run       - Start the CVAT SAM2 MCP server (stdio)"
+	@echo "  make cvat-mcp-health    - Quick health check of CVAT/SAM2 connectivity"
+	@echo "  make cvat-mcp-smoke     - Run pre-flight smoke tests (no CVAT required)"
+	@echo "  make annotation-dry-run - Dry-run the annotation pipeline (INPUT_DIR=...)"
+	@echo "  make annotation-run     - Run the full annotation pipeline (INPUT_DIR=...)"
+	@echo ""
+	@echo "Quality gates:"
+	@echo "  make lint               - Run ruff check + format check"
+	@echo "  make test               - Run pytest"
+	@echo "  make compile            - Compile all source files"
 	@echo ""
 	@echo "WSL / CCE:"
 	@echo "  make wsl-system-deps    - Install WSL system dependencies (build-essential, cmake, git, python3, pipx)"
@@ -318,3 +333,71 @@ cce-uninstall:
 	set -euxo pipefail; \
 	pipx uninstall code-context-engine; \
 	echo "CCE uninstalled"
+
+# ---- MCP / Annotation tools ----
+
+PYTHON := $(VENV_PATH)/bin/python3
+
+lint:
+	$(VENV_PATH)/bin/ruff check src/cvat_sam2_mcp tests
+	$(VENV_PATH)/bin/ruff format --check src/cvat_sam2_mcp tests
+
+format-check:
+	$(VENV_PATH)/bin/ruff format src/cvat_sam2_mcp tests
+
+test:
+	$(VENV_PATH)/bin/pytest tests/ -v
+
+compile:
+	$(VENV_PATH)/bin/python -m compileall src/cvat_sam2_mcp
+
+cvat-mcp-run:
+	@echo "Starting CVAT SAM2 MCP server (stdio)..."
+	@echo "Connect opencode via the cvat-sam2 MCP config entry."
+	$(PYTHON) -m cvat_sam2_mcp.server
+
+cvat-mcp-health:
+	@echo "Running MCP smoke health check..."
+	@$(PYTHON) -c "\
+	import json, sys; \
+	from cvat_sam2_mcp.cvat_client import CvatClient; \
+	from cvat_sam2_mcp.settings import get_settings; \
+	s = get_settings(); \
+	c = CvatClient(s.cvat_base_url, s.cvat_username, s.cvat_password); \
+	r = c.health(); \
+	print(json.dumps(r, indent=2)); \
+	ok = r.get('reachable') or r.get('serverless_reachable'); \
+	sys.exit(0 if ok else 1); \
+	" 2>/dev/null || echo "CVAT/SAM2 not reachable (expected if not running)"
+
+cvat-mcp-smoke:
+	@echo "Running MCP pre-flight smoke tests..."
+	$(VENV_PATH)/bin/pytest tests/test_cvat_sam2_mcp.py -v --tb=short
+
+annotation-dry-run:
+	@if [ -z "$(INPUT_DIR)" ]; then \
+		echo "Usage: make annotation-dry-run INPUT_DIR=/path/to/images PROTOCOL=annotation_protocols/archaeology_symbols_v1.yaml"; \
+		exit 1; \
+	fi
+	@set -euxo pipefail; \
+	protocol="${PROTOCOL:-annotation_protocols/archaeology_symbols_v1.yaml}"; \
+	$(PYTHON) -c "\
+	import json, sys; \
+	from cvat_sam2_mcp.annotation_runner import start_run; \
+	r = start_run('${protocol}', '${INPUT_DIR}', dry_run=True); \
+	print(json.dumps(r, indent=2)); \
+	"
+
+annotation-run:
+	@if [ -z "$(INPUT_DIR)" ]; then \
+		echo "Usage: make annotation-run INPUT_DIR=/path/to/images PROTOCOL=annotation_protocols/archaeology_symbols_v1.yaml"; \
+		exit 1; \
+	fi
+	@set -euxo pipefail; \
+	protocol="${PROTOCOL:-annotation_protocols/archaeology_symbols_v1.yaml}"; \
+	$(PYTHON) -c "\
+	import json, sys; \
+	from cvat_sam2_mcp.annotation_runner import start_run; \
+	r = start_run('${protocol}', '${INPUT_DIR}', dry_run=False); \
+	print(json.dumps(r, indent=2)); \
+	"
