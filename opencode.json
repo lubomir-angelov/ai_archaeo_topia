@@ -68,7 +68,7 @@
       }
     }
   },
-  "model": "llamacpp/Qwen3.6-27B-UD-Q8_K_XL",
+  "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
   "share": "disabled",
   "autoupdate": false,
   "provider": {
@@ -79,8 +79,8 @@
         "baseURL": "http://127.0.0.1:8000/v1"
       },
       "models": {
-        "Qwen3.6-27B-UD-Q8_K_XL": {
-          "name": "Qwen3.6-27B-UD-Q5_K_XL",
+        "Qwen3.6-27B-UD-Q4_K_XL": {
+          "name": "Qwen3.6-27B-UD-Q4_K_XL",
           "limit": {
             "context": 262144,
             "output": 16384
@@ -117,7 +117,7 @@
     "build": {
       "description": "Primary implementation agent for gkrp_data_portal.",
       "mode": "primary",
-      "model": "llamacpp/Qwen3.6-27B-UD-Q8_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 30,
@@ -180,7 +180,7 @@
     "plan": {
       "description": "Read-only planning agent. Use before invasive code changes.",
       "mode": "primary",
-      "model": "llamacpp/Qwen3.6-27B-UD-Q8_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 20,
@@ -215,7 +215,7 @@
     "explorer": {
       "description": "Explores the codebase, inspects files, traces dependencies, and explains findings before implementation.",
       "mode": "subagent",
-      "model": "llamacpp/Qwen3.6-27B-UD-Q8_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 20,
@@ -243,7 +243,7 @@
     "implementator": {
       "description": "Implements targeted changes after the relevant files and constraints are known.",
       "mode": "subagent",
-      "model": "llamacpp/Qwen3.6-27B-UD-Q8_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 25,
@@ -281,7 +281,7 @@
     "reviewer": {
       "description": "Reviews code changes for correctness, regression risk, tests, typing, and project conventions.",
       "mode": "subagent",
-      "model": "llamacpp/Qwen3.6-27B-UD-Q8_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 18,
