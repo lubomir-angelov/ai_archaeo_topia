@@ -8,9 +8,11 @@ version = "0.1.0"
 description = "MCP server for CVAT + SAM2 GPU auto-annotation of archaeological map images"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115",
     "mcp>=1.20",
     "Pillow>=10.0",
     "requests>=2.31",
+    "uvicorn>=0.30",
     "PyYAML>=6.0",
     "pydantic>=2.10",
     "pydantic-settings>=2.5",

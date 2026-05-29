@@ -10,6 +10,7 @@ SHELL := /usr/bin/env bash
 .PHONY: annotation-dry-run annotation-run
 .PHONY: lint format-check test compile
 .PHONY: sam2-mcp-run sam2-mcp-health sam2-mcp-smoke sam2-mcp-contract-test sam2-mcp-mock-smoke sam2-mcp-live-health
+.PHONY: sam2-backend-run sam2-backend-health sam2-backend-mock-smoke sam2-backend-contract-test
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeo_topia
@@ -71,6 +72,10 @@ help:
 	@echo "  make sam2-mcp-mock-smoke      - Run SAM2 MCP mock-mode smoke tests"
 	@echo "  make sam2-mcp-contract-test   - Run backend contract validation tests"
 	@echo "  make sam2-mcp-live-health     - Check live SAM2 backend health via curl"
+	@echo "  make sam2-backend-run             - Start the SAM2 backend HTTP service"
+	@echo "  make sam2-backend-health          - Check SAM2 backend health via curl"
+	@echo "  make sam2-backend-mock-smoke      - Run SAM2 backend mock-mode smoke test"
+	@echo "  make sam2-backend-contract-test   - Run SAM2 backend contract tests"
 	@echo "  make annotation-dry-run - Dry-run the annotation pipeline (INPUT_DIR=...)"
 	@echo "  make annotation-run     - Run the full annotation pipeline (INPUT_DIR=...)"
 	@echo ""
@@ -348,15 +353,16 @@ PYTHON := $(VENV_PATH)/bin/python3
 lint:
 	$(VENV_PATH)/bin/ruff check src/cvat_sam2_mcp src/services tests
 	$(VENV_PATH)/bin/ruff format --check src/cvat_sam2_mcp src/services tests
+	$(VENV_PATH)/bin/ruff check src/services/sam2_backend
 
 format-check:
-	$(VENV_PATH)/bin/ruff format src/cvat_sam2_mcp src/services tests
+	$(VENV_PATH)/bin/ruff format src/cvat_sam2_mcp src/services tests src/services/sam2_backend
 
 test:
 	$(VENV_PATH)/bin/pytest tests/ -v
 
 compile:
-	$(VENV_PATH)/bin/python -m compileall src/cvat_sam2_mcp src/services
+	$(VENV_PATH)/bin/python -m compileall src/cvat_sam2_mcp src/services src/services/sam2_backend
 
 cvat-mcp-run:
 	@echo "Starting CVAT SAM2 MCP server (stdio)..."
@@ -464,3 +470,41 @@ sam2-mcp-live-health:
 	curl -sf --max-time 10 "$$backend_url/health" 2>/dev/null | $(PYTHON) -m json.tool && \
 		echo "Backend is healthy" || \
 		echo "Backend is unreachable or returned an error"
+
+# ---- SAM2 Backend service ----
+
+sam2-backend-run:
+	@echo "Starting SAM2 backend service (HTTP)..."
+	@echo "Mode: $${SAM2_BACKEND_MODE:-mock}"
+	@echo "Host: $${SAM2_BACKEND_HOST:-0.0.0.0}"
+	@echo "Port: $${SAM2_BACKEND_PORT:-8080}"
+	$(PYTHON) -m services.sam2_backend.main
+
+sam2-backend-health:
+	@echo "Checking SAM2 backend health..."
+	@backend_url="$${SAM2_BACKEND_URL:-http://127.0.0.1:$${SAM2_BACKEND_PORT:-8080}}"; \
+	echo "Backend URL: $$backend_url"; \
+	curl -sf --max-time 10 "$$backend_url/health" 2>/dev/null | $(PYTHON) -m json.tool && \
+		echo "Backend is healthy" || \
+		echo "Backend is unreachable or returned an error"
+
+sam2-backend-mock-smoke:
+	@echo "Running SAM2 backend mock-mode smoke tests..."
+	@$(PYTHON) -c "\
+	import json, os, sys; \
+	os.environ['SAM2_BACKEND_MODE'] = 'mock'; \
+	os.environ['SAM2_BACKEND_OUTPUT_DIR'] = '/tmp/sam2_backend_smoke'; \
+	from services.sam2_backend.settings import reset_settings; \
+	reset_settings(); \
+	from services.sam2_backend.predictor import SAM2PredictorBackend; \
+	p = SAM2PredictorBackend(); \
+	p.ensure_loaded(); \
+	assert p.is_loaded, 'model should be loaded in mock mode'; \
+	assert p.device == 'mock', 'device should be mock'; \
+	print('  predictor: OK (mode=mock)'); \
+	print(json.dumps({'ok': True, 'device': p.device, 'loaded': p.is_loaded}, indent=2)); \
+	"
+
+sam2-backend-contract-test:
+	@echo "Running SAM2 backend contract tests..."
+	$(VENV_PATH)/bin/pytest tests/test_sam2_backend.py -v --tb=short
