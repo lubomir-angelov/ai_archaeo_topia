@@ -225,3 +225,4 @@ tools/cvat/
 .mcp.json
 .claude/*
 opencode.json*
+data/
