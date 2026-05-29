@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 
 from services.sam2_mcp.client import Sam2BackendClient
-from services.sam2_mcp.errors import ImageError, ValidationError
+from services.sam2_mcp.errors import BackendError, ImageError, ValidationError
 from services.sam2_mcp.schemas import (
     GenerateProposalsInput,
     SegmentBoxInput,
@@ -381,3 +381,278 @@ class TestPackage:
         import services.sam2_mcp.server  # noqa: F401
         import services.sam2_mcp.service  # noqa: F401
         import services.sam2_mcp.settings  # noqa: F401
+
+
+# ── Live backend error handling tests ─────────────────────────────
+
+
+class TestLiveBackendErrors:
+    """Test error handling when the live backend misbehaves."""
+
+    def test_health_unreachable(self) -> None:
+        c = Sam2BackendClient(
+            backend_url="http://127.0.0.1:59999",
+            timeout=0.1,
+        )
+        h = c.check_health()
+        assert h["reachable"] is False
+        assert h["mode"] == "live"
+
+    def test_health_timeout(self) -> None:
+        c = Sam2BackendClient(
+            backend_url="http://127.0.0.1:59999",
+            timeout=0.01,
+        )
+        h = c.check_health()
+        assert h["reachable"] is False
+
+    def test_segment_box_backend_error_status(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+        mock_resp.text = "Internal server error"
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+
+        c = Sam2BackendClient(backend_url="http://fake.test", timeout=1.0)
+        c._session = mock_session
+        c._is_mock = False
+
+        with pytest.raises(BackendError, match="HTTP 500"):
+            c.segment_box(str(tmp_path / "x.png"), [0, 0, 10, 10])
+
+    def test_segment_box_invalid_json(self) -> None:
+        from unittest.mock import MagicMock
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.side_effect = ValueError("Expecting value")
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+
+        c = Sam2BackendClient(backend_url="http://fake.test", timeout=1.0)
+        c._session = mock_session
+        c._is_mock = False
+
+        with pytest.raises(BackendError, match="invalid JSON"):
+            c.segment_box("/tmp/x.png", [0, 0, 10, 10])
+
+    def test_segment_box_invalid_bbox_in_response(self) -> None:
+        from unittest.mock import MagicMock
+
+        bad_data = {
+            "image_path": "/tmp/x.png",
+            "bbox": [1, 2, 3],
+            "polygon": [],
+            "mask_path": "",
+            "confidence": 0.5,
+        }
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = bad_data
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+
+        c = Sam2BackendClient(backend_url="http://fake.test", timeout=1.0)
+        c._session = mock_session
+        c._is_mock = False
+
+        with pytest.raises(BackendError, match="invalid segment data"):
+            c.segment_box("/tmp/x.png", [0, 0, 10, 10])
+
+    def test_segment_box_mask_path_escape(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        output_dir = str(tmp_path / "output")
+        bad_mask = "/etc/passwd"
+        good_data = {
+            "image_path": "/tmp/x.png",
+            "bbox": [0.0, 0.0, 10.0, 10.0],
+            "polygon": [[0, 0], [10, 0], [10, 10], [0, 10]],
+            "mask_path": bad_mask,
+            "confidence": 0.5,
+        }
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = good_data
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+
+        c = Sam2BackendClient(
+            backend_url="http://fake.test",
+            timeout=1.0,
+            output_dir=output_dir,
+        )
+        c._session = mock_session
+        c._is_mock = False
+
+        with pytest.raises(BackendError, match="outside output_dir"):
+            c.segment_box("/tmp/x.png", [0, 0, 10, 10])
+
+    def test_proposal_invalid_response(self) -> None:
+        from unittest.mock import MagicMock
+
+        bad_data = {"items": "not_a_list"}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = bad_data
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+
+        c = Sam2BackendClient(backend_url="http://fake.test", timeout=1.0)
+        c._session = mock_session
+        c._is_mock = False
+
+        with pytest.raises(BackendError, match="invalid proposal data"):
+            c.generate_proposals("/tmp/x.png")
+
+    def test_proposal_mask_path_escape(self, tmp_path: Path) -> None:
+        from unittest.mock import MagicMock
+
+        output_dir = str(tmp_path / "output")
+        bad_mask = "/tmp/escaped.png"
+        good_data = {
+            "items": [
+                {
+                    "image_path": "/tmp/x.png",
+                    "bbox": [0.0, 0.0, 10.0, 10.0],
+                    "polygon": [[0, 0], [10, 0], [10, 10], [0, 10]],
+                    "mask_path": bad_mask,
+                    "confidence": 0.5,
+                }
+            ]
+        }
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = good_data
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+
+        c = Sam2BackendClient(
+            backend_url="http://fake.test",
+            timeout=1.0,
+            output_dir=output_dir,
+        )
+        c._session = mock_session
+        c._is_mock = False
+
+        with pytest.raises(BackendError, match="outside output_dir"):
+            c.generate_proposals("/tmp/x.png")
+
+    def test_proposal_confidence_out_of_range(self) -> None:
+        from unittest.mock import MagicMock
+
+        bad_data = {
+            "items": [
+                {
+                    "image_path": "/tmp/x.png",
+                    "bbox": [0.0, 0.0, 10.0, 10.0],
+                    "polygon": [],
+                    "mask_path": "",
+                    "confidence": 1.5,
+                }
+            ]
+        }
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = bad_data
+        mock_session = MagicMock()
+        mock_session.post.return_value = mock_resp
+
+        c = Sam2BackendClient(backend_url="http://fake.test", timeout=1.0)
+        c._session = mock_session
+        c._is_mock = False
+
+        with pytest.raises(BackendError, match="invalid proposal data"):
+            c.generate_proposals("/tmp/x.png")
+
+
+# ── Backend contract schema tests ─────────────────────────────────
+
+
+class TestBackendSchemas:
+    """Test that backend contract schemas validate correctly."""
+
+    def test_health_response_valid(self) -> None:
+        from services.sam2_mcp.schemas import HealthResponse
+
+        h = HealthResponse(ok=True, service="sam2_backend", model="sam2", device="cuda")
+        assert h.ok is True
+        assert h.device == "cuda"
+
+    def test_segment_response_valid(self) -> None:
+        from services.sam2_mcp.schemas import SegmentResponse
+
+        s = SegmentResponse(
+            image_path="/tmp/x.png",
+            bbox=[0.0, 0.0, 10.0, 10.0],
+            polygon=[[0, 0], [10, 0], [10, 10], [0, 10]],
+            mask_path="/tmp/out/mask.png",
+            confidence=0.92,
+        )
+        assert s.confidence == 0.92
+        assert len(s.bbox) == 4
+
+    def test_segment_response_bad_confidence(self) -> None:
+        from services.sam2_mcp.schemas import SegmentResponse
+
+        with pytest.raises(ValueError):
+            SegmentResponse(
+                image_path="/tmp/x.png",
+                bbox=[0.0, 0.0, 10.0, 10.0],
+                confidence=-0.1,
+            )
+
+    def test_segment_response_bad_bbox_length(self) -> None:
+        from services.sam2_mcp.schemas import SegmentResponse
+
+        with pytest.raises(ValueError):
+            SegmentResponse(
+                image_path="/tmp/x.png",
+                bbox=[0.0, 0.0],
+            )
+
+    def test_proposal_response_valid(self) -> None:
+        from services.sam2_mcp.schemas import ProposalResponse
+
+        p = ProposalResponse(
+            items=[
+                {
+                    "image_path": "/tmp/x.png",
+                    "bbox": [0.0, 0.0, 10.0, 10.0],
+                    "polygon": [],
+                    "mask_path": "",
+                    "confidence": 0.5,
+                }
+            ]
+        )
+        assert len(p.items) == 1
+
+    def test_proposal_request_valid(self) -> None:
+        from services.sam2_mcp.schemas import ProposalRequest
+
+        r = ProposalRequest(image_path="/tmp/x.png", max_proposals=25)
+        assert r.max_proposals == 25
+        assert r.label_hint == ""
+
+    def test_segment_bbox_request_valid(self) -> None:
+        from services.sam2_mcp.schemas import SegmentBboxRequest
+
+        r = SegmentBboxRequest(
+            image_path="/tmp/x.png",
+            bbox=[10.0, 20.0, 50.0, 60.0],
+            label="mound",
+        )
+        assert r.prompt_type == "bbox"
+        assert r.label == "mound"
+
+    def test_segment_points_request_valid(self) -> None:
+        from services.sam2_mcp.schemas import SegmentPointsRequest
+
+        r = SegmentPointsRequest(
+            image_path="/tmp/x.png",
+            points=[[30.0, 40.0]],
+            point_labels=[1],
+        )
+        assert r.prompt_type == "points"

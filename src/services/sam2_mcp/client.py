@@ -8,6 +8,7 @@ returns plausible masks for testing without a GPU backend.
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,12 @@ from typing import Any
 import requests
 
 from .errors import BackendError
-from .schemas import SegmentationItem
+from .schemas import (
+    HealthResponse,
+    ProposalResponse,
+    SegmentationItem,
+    SegmentResponse,
+)
 from .settings import get_settings
 
 logger = logging.getLogger(__name__)
@@ -30,44 +36,73 @@ class Sam2BackendClient:
         self,
         backend_url: str | None = None,
         timeout: float | None = None,
+        output_dir: str | None = None,
     ) -> None:
         settings = get_settings()
         self.backend_url = (backend_url or settings.backend_url).rstrip("/")
         self.timeout = timeout if timeout is not None else settings.backend_timeout
+        self.output_dir = output_dir or str(settings.output_path)
         self._session = requests.Session()
         self._is_mock = self.backend_url.lower() == "mock"
+        logger.info(
+            "Sam2BackendClient initialised (mode=%s, url=%s, timeout=%.1f, output=%s)",
+            "mock" if self._is_mock else "live",
+            self.backend_url,
+            self.timeout,
+            self.output_dir,
+        )
 
     # ── health ────────────────────────────────────────────────────
 
     def check_health(self) -> dict[str, Any]:
         """Probe the backend and return a health dict."""
         if self._is_mock:
+            logger.debug("Mock health check (always healthy)")
             return {
                 "mode": "mock",
                 "backend_url": self.backend_url,
                 "reachable": True,
             }
 
+        logger.info("Live health check for %s/health", self.backend_url)
         try:
             resp = self._session.get(
                 f"{self.backend_url}/health",
                 timeout=min(self.timeout, 5.0),
             )
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                    HealthResponse(**data)
+                    logger.info("Health check OK (status=%d)", resp.status_code)
+                except (json.JSONDecodeError, ValueError) as exc:
+                    logger.warning("Health returned invalid JSON: %s", exc)
+                    data = resp.text[:200]
+                return {
+                    "mode": "live",
+                    "backend_url": self.backend_url,
+                    "reachable": True,
+                    "status_code": resp.status_code,
+                    "response": data,
+                }
+            logger.warning("Health check failed (status=%d)", resp.status_code)
             return {
                 "mode": "live",
                 "backend_url": self.backend_url,
-                "reachable": resp.status_code == 200,
+                "reachable": False,
                 "status_code": resp.status_code,
-                "response": resp.json() if resp.status_code == 200 else resp.text[:200],
+                "response": resp.text[:200],
             }
-        except requests.ConnectionError:
+        except requests.ConnectionError as exc:
+            logger.error("Health check connection error: %s", exc)
             return {
                 "mode": "live",
                 "backend_url": self.backend_url,
                 "reachable": False,
                 "error": "connection_refused",
             }
-        except requests.Timeout:
+        except requests.Timeout as exc:
+            logger.error("Health check timeout: %s", exc)
             return {
                 "mode": "live",
                 "backend_url": self.backend_url,
@@ -85,7 +120,9 @@ class Sam2BackendClient:
     ) -> SegmentationItem:
         """Segment using a bounding-box prompt."""
         if self._is_mock:
+            logger.debug("Mock segment_box for %s", image_path)
             return self._mock_segment(image_path, bbox, label=label)
+        logger.info("Live segment_box for %s bbox=%s", image_path, bbox)
         return self._live_segment_box(image_path, bbox, label)
 
     def segment_points(
@@ -97,7 +134,9 @@ class Sam2BackendClient:
     ) -> SegmentationItem:
         """Segment using point prompts."""
         if self._is_mock:
+            logger.debug("Mock segment_points for %s (%d points)", image_path, len(points))
             return self._mock_segment_points(image_path, points, point_labels, label)
+        logger.info("Live segment_points for %s (%d points)", image_path, len(points))
         return self._live_segment_points(image_path, points, point_labels, label)
 
     def generate_proposals(
@@ -108,7 +147,14 @@ class Sam2BackendClient:
     ) -> list[SegmentationItem]:
         """Generate candidate proposals for an image."""
         if self._is_mock:
+            logger.debug("Mock proposals for %s (max=%d)", image_path, max_proposals)
             return self._mock_proposals(image_path, max_proposals, label_hint)
+        logger.info(
+            "Live proposals for %s (max=%d, hint=%s)",
+            image_path,
+            max_proposals,
+            label_hint,
+        )
         return self._live_proposals(image_path, max_proposals, label_hint)
 
     # ── live backend calls ────────────────────────────────────────
@@ -124,16 +170,17 @@ class Sam2BackendClient:
             "prompt_type": "bbox",
             "bbox": bbox,
             "label": label,
+            "output_dir": self.output_dir,
         }
-        resp = self._session.post(
+        resp = self._post_with_validation(
             f"{self.backend_url}/segment",
-            json=payload,
-            timeout=self.timeout,
+            payload,
+            "segment_box",
         )
-        if resp.status_code != 200:
-            raise BackendError(f"SAM2 backend returned {resp.status_code}: {resp.text[:200]}")
-        data = resp.json()
-        return SegmentationItem(**data)
+        data = self._parse_json_response(resp, "segment_box")
+        seg = self._validate_segment_response(data, image_path)
+        self._validate_mask_path(seg.mask_path, "segment_box")
+        return self._to_segmentation_item(seg)
 
     def _live_segment_points(
         self,
@@ -148,16 +195,17 @@ class Sam2BackendClient:
             "points": points,
             "point_labels": point_labels,
             "label": label,
+            "output_dir": self.output_dir,
         }
-        resp = self._session.post(
+        resp = self._post_with_validation(
             f"{self.backend_url}/segment",
-            json=payload,
-            timeout=self.timeout,
+            payload,
+            "segment_points",
         )
-        if resp.status_code != 200:
-            raise BackendError(f"SAM2 backend returned {resp.status_code}: {resp.text[:200]}")
-        data = resp.json()
-        return SegmentationItem(**data)
+        data = self._parse_json_response(resp, "segment_points")
+        seg = self._validate_segment_response(data, image_path)
+        self._validate_mask_path(seg.mask_path, "segment_points")
+        return self._to_segmentation_item(seg)
 
     def _live_proposals(
         self,
@@ -169,17 +217,110 @@ class Sam2BackendClient:
             "image_path": image_path,
             "max_proposals": max_proposals,
             "label_hint": label_hint,
+            "output_dir": self.output_dir,
         }
-        resp = self._session.post(
+        resp = self._post_with_validation(
             f"{self.backend_url}/propose",
+            payload,
+            "propose",
+        )
+        data = self._parse_json_response(resp, "propose")
+        return self._validate_proposal_response(data, image_path)
+
+    # ── HTTP helpers ──────────────────────────────────────────────
+
+    def _post_with_validation(
+        self, url: str, payload: dict[str, Any], op_name: str
+    ) -> requests.Response:
+        """POST with status-code validation."""
+        resp = self._session.post(
+            url,
             json=payload,
             timeout=self.timeout,
         )
         if resp.status_code != 200:
-            raise BackendError(f"SAM2 backend returned {resp.status_code}: {resp.text[:200]}")
-        data = resp.json()
-        items = data.get("items", data if isinstance(data, list) else [])
-        return [SegmentationItem(**item) for item in items]
+            body = resp.text[:300]
+            logger.error("Backend %s returned status %d: %s", op_name, resp.status_code, body)
+            raise BackendError(f"SAM2 backend {op_name} returned HTTP {resp.status_code}: {body}")
+        return resp
+
+    @staticmethod
+    def _parse_json_response(resp: requests.Response, op_name: str) -> dict[str, Any]:
+        """Parse JSON from response with clear error."""
+        try:
+            return resp.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.error("Backend %s returned invalid JSON: %s", op_name, exc)
+            raise BackendError(f"SAM2 backend {op_name} returned invalid JSON: {exc}") from exc
+
+    # ── response validators ───────────────────────────────────────
+
+    @staticmethod
+    def _validate_segment_response(data: dict[str, Any], expected_image: str) -> SegmentResponse:
+        """Validate and parse a segment response."""
+        try:
+            return SegmentResponse(**data)
+        except ValueError as exc:
+            logger.error("Invalid segment response: %s", exc)
+            raise BackendError(f"SAM2 backend returned invalid segment data: {exc}") from exc
+
+    def _validate_proposal_response(
+        self, data: dict[str, Any], expected_image: str
+    ) -> list[SegmentationItem]:
+        """Validate and parse a proposal response."""
+        try:
+            resp = ProposalResponse(**data)
+        except ValueError as exc:
+            logger.error("Invalid proposal response: %s", exc)
+            raise BackendError(f"SAM2 backend returned invalid proposal data: {exc}") from exc
+
+        items: list[SegmentationItem] = []
+        for i, item in enumerate(resp.items):
+            self._validate_mask_path(item.mask_path, f"proposal[{i}]")
+            items.append(
+                SegmentationItem(
+                    image_path=item.image_path,
+                    bbox=item.bbox,
+                    polygon=item.polygon,
+                    mask_path=item.mask_path,
+                    confidence=item.confidence,
+                    label=item.label,
+                    source="sam2_mcp",
+                    status="pending_review",
+                )
+            )
+        logger.info("Proposal response validated (%d items)", len(items))
+        return items
+
+    def _validate_mask_path(self, mask_path: str, context: str) -> None:
+        """Ensure mask_path is under the configured output directory."""
+        if not mask_path:
+            return
+        out = Path(self.output_dir).resolve()
+        mask = Path(mask_path).resolve()
+        try:
+            mask.relative_to(out)
+        except ValueError:
+            logger.error(
+                "mask_path %s is outside output_dir %s (%s)", mask_path, self.output_dir, context
+            )
+            raise BackendError(
+                f"Backend returned mask_path outside output_dir: {mask_path!r}"
+            ) from None
+
+    @staticmethod
+    def _to_segmentation_item(seg: SegmentResponse) -> SegmentationItem:
+        """Convert backend SegmentResponse to internal SegmentationItem."""
+        return SegmentationItem(
+            image_path=seg.image_path,
+            bbox=seg.bbox,
+            polygon=seg.polygon,
+            mask_path=seg.mask_path,
+            confidence=seg.confidence,
+            label=seg.label,
+            source="sam2_mcp",
+            status="pending_review",
+        )
 
     # ── mock implementations ──────────────────────────────────────
 

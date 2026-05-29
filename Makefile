@@ -9,7 +9,7 @@ SHELL := /usr/bin/env bash
 .PHONY: cvat-mcp-run cvat-mcp-health cvat-mcp-smoke
 .PHONY: annotation-dry-run annotation-run
 .PHONY: lint format-check test compile
-.PHONY: sam2-mcp-run sam2-mcp-health sam2-mcp-smoke
+.PHONY: sam2-mcp-run sam2-mcp-health sam2-mcp-smoke sam2-mcp-contract-test sam2-mcp-mock-smoke sam2-mcp-live-health
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeo_topia
@@ -65,9 +65,12 @@ help:
 	@echo "  make cvat-mcp-run       - Start the CVAT SAM2 MCP server (stdio)"
 	@echo "  make cvat-mcp-health    - Quick health check of CVAT/SAM2 connectivity"
 	@echo "  make cvat-mcp-smoke     - Run pre-flight smoke tests (no CVAT required)"
-	@echo "  make sam2-mcp-run       - Start the SAM2 MCP service (stdio, standalone)"
-	@echo "  make sam2-mcp-health    - Quick health check of SAM2 MCP service"
-	@echo "  make sam2-mcp-smoke     - Run SAM2 MCP smoke tests"
+	@echo "  make sam2-mcp-run             - Start the SAM2 MCP service (stdio, standalone)"
+	@echo "  make sam2-mcp-health          - Quick health check of SAM2 MCP service"
+	@echo "  make sam2-mcp-smoke           - Run SAM2 MCP smoke tests"
+	@echo "  make sam2-mcp-mock-smoke      - Run SAM2 MCP mock-mode smoke tests"
+	@echo "  make sam2-mcp-contract-test   - Run backend contract validation tests"
+	@echo "  make sam2-mcp-live-health     - Check live SAM2 backend health via curl"
 	@echo "  make annotation-dry-run - Dry-run the annotation pipeline (INPUT_DIR=...)"
 	@echo "  make annotation-run     - Run the full annotation pipeline (INPUT_DIR=...)"
 	@echo ""
@@ -432,3 +435,32 @@ sam2-mcp-health:
 sam2-mcp-smoke:
 	@echo "Running SAM2 MCP smoke tests..."
 	$(VENV_PATH)/bin/pytest tests/test_sam2_mcp.py -v --tb=short
+
+sam2-mcp-mock-smoke:
+	@echo "Running SAM2 MCP mock-mode smoke tests..."
+	@$(PYTHON) -c "\
+	import json, os, sys; \
+	os.environ['SAM2_MCP_BACKEND_URL'] = 'mock'; \
+	os.environ['SAM2_MCP_OUTPUT_DIR'] = '/tmp/sam2_mcp_smoke'; \
+	from services.sam2_mcp.settings import reset_settings; \
+	reset_settings(); \
+	from services.sam2_mcp.service import Sam2Service; \
+	from services.sam2_mcp.schemas import SegmentBoxInput, SegmentPointsInput, GenerateProposalsInput; \
+	svc = Sam2Service(); \
+	h = svc.health_check(); \
+	assert h.ok, 'health check failed'; \
+	print('  health: OK'); \
+	print(json.dumps(h.model_dump(), indent=2)); \
+	"
+
+sam2-mcp-contract-test:
+	@echo "Running SAM2 MCP backend contract tests..."
+	$(VENV_PATH)/bin/pytest tests/test_sam2_mcp.py -v --tb=short -k "LiveBackendErrors or BackendSchemas"
+
+sam2-mcp-live-health:
+	@echo "Checking live SAM2 backend health..."
+	@backend_url="$${SAM2_MCP_BACKEND_URL:-http://127.0.0.1:8080}"; \
+	echo "Backend URL: $$backend_url"; \
+	curl -sf --max-time 10 "$$backend_url/health" 2>/dev/null | $(PYTHON) -m json.tool && \
+		echo "Backend is healthy" || \
+		echo "Backend is unreachable or returned an error"

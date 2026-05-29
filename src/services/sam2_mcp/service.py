@@ -15,7 +15,7 @@ from typing import Any
 from PIL import Image
 
 from .client import Sam2BackendClient
-from .errors import BackendError, ImageError, ValidationError
+from .errors import BackendError, ImageError, OutputError, ValidationError
 from .schemas import (
     GenerateProposalsInput,
     HealthOutput,
@@ -37,6 +37,11 @@ class Sam2Service:
     def __init__(self, client: Sam2BackendClient | None = None) -> None:
         self.client = client or Sam2BackendClient()
         self.settings = get_settings()
+        logger.info(
+            "Sam2Service initialised (backend=%s, output=%s)",
+            self.client.backend_url,
+            self.settings.output_dir,
+        )
 
     # ── health ────────────────────────────────────────────────────
 
@@ -44,12 +49,14 @@ class Sam2Service:
         """Check service and backend health."""
         details = self.client.check_health()
         ok = details.get("reachable", False)
-        return HealthOutput(
+        result = HealthOutput(
             ok=ok,
             service="sam2_mcp",
             backend=self.client.backend_url,
             details=details,
         )
+        logger.info("Health check result: ok=%s backend=%s", ok, self.client.backend_url)
+        return result
 
     # ── box segmentation ─────────────────────────────────────────
 
@@ -58,6 +65,7 @@ class Sam2Service:
         self._validate_image_path(inp.image_path)
         self._validate_bbox(inp.bbox, inp.image_path)
         item = self.client.segment_box(inp.image_path, inp.bbox, inp.label)
+        self._validate_segmentation_item(item, "segment_box")
         return self._save_and_return_box(item, inp.image_path)
 
     # ── point segmentation ───────────────────────────────────────
@@ -67,6 +75,7 @@ class Sam2Service:
         self._validate_image_path(inp.image_path)
         self._validate_points(inp.points, inp.point_labels, inp.image_path)
         item = self.client.segment_points(inp.image_path, inp.points, inp.point_labels, inp.label)
+        self._validate_segmentation_item(item, "segment_points")
         return self._save_and_return_points(item, inp.image_path, inp.points, inp.point_labels)
 
     # ── proposals ────────────────────────────────────────────────
@@ -94,11 +103,55 @@ class Sam2Service:
                 items = self.client.generate_proposals(
                     img_path, max_proposals=max_prop, label_hint=inp.label_hint
                 )
+                for item in items:
+                    self._validate_segmentation_item(item, "generate_proposals")
                 all_items.extend(items)
             except BackendError as exc:
                 logger.warning("Backend error for %s: %s", img_path, exc)
 
+        logger.info("Generated %d proposals for %d image(s)", len(all_items), len(image_paths))
         return ProposalsOutput(items=all_items)
+
+    # ── output validation ────────────────────────────────────────
+
+    def _validate_segmentation_item(self, item: SegmentationItem, context: str) -> None:
+        """Validate a segmentation item returned by the backend."""
+        if item.source != "sam2_mcp":
+            item.source = "sam2_mcp"
+        if item.status != "pending_review":
+            item.status = "pending_review"
+
+        if len(item.bbox) != 4:
+            raise BackendError(
+                f"Invalid bbox in {context} response: expected 4 values, got {len(item.bbox)}"
+            )
+        for v in item.bbox:
+            if not isinstance(v, (int, float)):
+                raise BackendError(f"Non-numeric bbox value in {context} response: {v!r}")
+
+        for _i, pt in enumerate(item.polygon):
+            if len(pt) != 2:
+                raise BackendError(
+                    f"Invalid polygon vertex in {context} response: expected [x, y], got {pt!r}"
+                )
+            for v in pt:
+                if not isinstance(v, (int, float)):
+                    raise BackendError(f"Non-numeric polygon value in {context} response: {v!r}")
+
+        if item.mask_path:
+            self._validate_mask_path(item.mask_path, context)
+
+    def _validate_mask_path(self, mask_path: str, context: str) -> None:
+        """Ensure mask_path is under the configured output directory."""
+        out = self.settings.output_path.resolve()
+        mask = Path(mask_path).resolve()
+        try:
+            mask.relative_to(out)
+        except ValueError:
+            raise BackendError(
+                f"Backend returned mask_path outside output_dir in {context}: "
+                f"{mask_path!r} (output_dir={self.settings.output_dir})"
+            ) from None
 
     # ── validation helpers ────────────────────────────────────────
 
@@ -191,11 +244,14 @@ class Sam2Service:
         out = self.settings.output_path
         out.mkdir(parents=True, exist_ok=True)
         path = out / filename
-        if hasattr(mask_array, "save"):
-            mask_array.save(str(path), "PNG")
-        else:
-            img = Image.fromarray(mask_array)
-            img.save(str(path), "PNG")
+        try:
+            if hasattr(mask_array, "save"):
+                mask_array.save(str(path), "PNG")
+            else:
+                img = Image.fromarray(mask_array)
+                img.save(str(path), "PNG")
+        except Exception as exc:
+            raise OutputError(f"Failed to write mask {path}: {exc}") from exc
         logger.info("Wrote mask to %s", path)
         return str(path)
 
@@ -216,16 +272,23 @@ class Sam2Service:
             except Exception as exc:
                 logger.warning("Failed to write mask: %s", exc)
 
-        return SegmentBoxOutput(
+        result = SegmentBoxOutput(
             image_path=item.image_path,
             label=item.label,
             bbox=item.bbox,
             mask_path=mask_path,
             polygon=item.polygon,
             confidence=item.confidence,
-            source=item.source,
-            status=item.status,
+            source="sam2_mcp",
+            status="pending_review",
         )
+        logger.info(
+            "segment_box result: image=%s mask=%s confidence=%.4f",
+            result.image_path,
+            mask_path,
+            result.confidence,
+        )
+        return result
 
     def _save_and_return_points(
         self,
@@ -251,7 +314,7 @@ class Sam2Service:
             except Exception as exc:
                 logger.warning("Failed to write mask: %s", exc)
 
-        return SegmentPointsOutput(
+        result = SegmentPointsOutput(
             image_path=item.image_path,
             label=item.label,
             points=points,
@@ -259,6 +322,13 @@ class Sam2Service:
             mask_path=mask_path,
             polygon=item.polygon,
             confidence=item.confidence,
-            source=item.source,
-            status=item.status,
+            source="sam2_mcp",
+            status="pending_review",
         )
+        logger.info(
+            "segment_points result: image=%s mask=%s confidence=%.4f",
+            result.image_path,
+            mask_path,
+            result.confidence,
+        )
+        return result

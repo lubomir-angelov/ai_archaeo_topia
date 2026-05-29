@@ -137,3 +137,87 @@ class ErrorResponse(BaseModel):
 
     error: str
     detail: str = ""
+
+
+# ── Backend HTTP contract schemas ─────────────────────────────────
+# These schemas define the wire format between the MCP service and
+# the live SAM2 inference backend.  They are NOT exposed to MCP
+# clients; they govern the internal client.py layer.
+
+
+class HealthResponse(BaseModel):
+    """Expected response from GET /health on the SAM2 backend."""
+
+    ok: bool
+    service: str = "sam2_backend"
+    model: str = "sam2"
+    device: str = "unknown"
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class SegmentBboxRequest(BaseModel):
+    """POST /segment request for a bounding-box prompt."""
+
+    image_path: str
+    prompt_type: str = "bbox"
+    bbox: list[float] = Field(min_length=4, max_length=4)
+    label: str = ""
+    output_dir: str = ""
+
+
+class SegmentPointsRequest(BaseModel):
+    """POST /segment request for a point prompt."""
+
+    image_path: str
+    prompt_type: str = "points"
+    points: list[list[float]]
+    point_labels: list[int]
+    label: str = ""
+    output_dir: str = ""
+
+
+class SegmentResponse(BaseModel):
+    """Expected response from POST /segment on the SAM2 backend."""
+
+    image_path: str
+    label: str = ""
+    bbox: list[float] = Field(min_length=4, max_length=4)
+    polygon: list[list[float]] = Field(default_factory=list)
+    mask_path: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProposalRequest(BaseModel):
+    """POST /propose request."""
+
+    image_path: str
+    label_hint: str = ""
+    max_proposals: int = Field(default=50, ge=1)
+    output_dir: str = ""
+
+
+class ProposalItem(BaseModel):
+    """Single proposal item inside the POST /propose response."""
+
+    image_path: str
+    label: str = ""
+    bbox: list[float] = Field(min_length=4, max_length=4)
+    polygon: list[list[float]] = Field(default_factory=list)
+    mask_path: str = ""
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProposalResponse(BaseModel):
+    """Expected response from POST /propose on the SAM2 backend."""
+
+    items: list[ProposalItem] = Field(default_factory=list)
+
+
+class BackendErrorResponse(BaseModel):
+    """Error response from the SAM2 backend."""
+
+    error: str
+    detail: str = ""
+    code: int = 0
