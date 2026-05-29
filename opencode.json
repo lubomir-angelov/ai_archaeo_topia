@@ -46,6 +46,10 @@
         "/home/naim/repos/ai_archaeo_topia"
       ]
     },
+    "ocr": {
+      "type": "remote",
+      "url": "http://localhost:8003/mcp"
+    },
     "cvat-sam2": {
       "type": "local",
       "command": [
