@@ -23,10 +23,11 @@ dev = [
 
 [project.scripts]
 cvat-sam2-mcp = "cvat_sam2_mcp.server:main"
+sam2-mcp = "services.sam2_mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["cvat_sam2_mcp*"]
+include = ["cvat_sam2_mcp*", "services*", "services.*"]
 
 [tool.ruff]
 target-version = "py312"

@@ -9,6 +9,7 @@ SHELL := /usr/bin/env bash
 .PHONY: cvat-mcp-run cvat-mcp-health cvat-mcp-smoke
 .PHONY: annotation-dry-run annotation-run
 .PHONY: lint format-check test compile
+.PHONY: sam2-mcp-run sam2-mcp-health sam2-mcp-smoke
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeo_topia
@@ -64,6 +65,9 @@ help:
 	@echo "  make cvat-mcp-run       - Start the CVAT SAM2 MCP server (stdio)"
 	@echo "  make cvat-mcp-health    - Quick health check of CVAT/SAM2 connectivity"
 	@echo "  make cvat-mcp-smoke     - Run pre-flight smoke tests (no CVAT required)"
+	@echo "  make sam2-mcp-run       - Start the SAM2 MCP service (stdio, standalone)"
+	@echo "  make sam2-mcp-health    - Quick health check of SAM2 MCP service"
+	@echo "  make sam2-mcp-smoke     - Run SAM2 MCP smoke tests"
 	@echo "  make annotation-dry-run - Dry-run the annotation pipeline (INPUT_DIR=...)"
 	@echo "  make annotation-run     - Run the full annotation pipeline (INPUT_DIR=...)"
 	@echo ""
@@ -339,17 +343,17 @@ cce-uninstall:
 PYTHON := $(VENV_PATH)/bin/python3
 
 lint:
-	$(VENV_PATH)/bin/ruff check src/cvat_sam2_mcp tests
-	$(VENV_PATH)/bin/ruff format --check src/cvat_sam2_mcp tests
+	$(VENV_PATH)/bin/ruff check src/cvat_sam2_mcp src/services tests
+	$(VENV_PATH)/bin/ruff format --check src/cvat_sam2_mcp src/services tests
 
 format-check:
-	$(VENV_PATH)/bin/ruff format src/cvat_sam2_mcp tests
+	$(VENV_PATH)/bin/ruff format src/cvat_sam2_mcp src/services tests
 
 test:
 	$(VENV_PATH)/bin/pytest tests/ -v
 
 compile:
-	$(VENV_PATH)/bin/python -m compileall src/cvat_sam2_mcp
+	$(VENV_PATH)/bin/python -m compileall src/cvat_sam2_mcp src/services
 
 cvat-mcp-run:
 	@echo "Starting CVAT SAM2 MCP server (stdio)..."
@@ -403,3 +407,28 @@ annotation-run:
 	r = start_run('$$protocol', '$(INPUT_DIR)', dry_run=False); \
 	print(json.dumps(r, indent=2)); \
 	"
+
+# ---- SAM2 MCP service ----
+
+sam2-mcp-run:
+	@echo "Starting SAM2 MCP server (stdio)..."
+	@echo "Backend: $$(echo ${SAM2_MCP_BACKEND_URL:-mock})"
+	$(PYTHON) -m services.sam2_mcp.server
+
+sam2-mcp-health:
+	@echo "Running SAM2 MCP health check..."
+	@$(PYTHON) -c "\
+	import json, os, sys; \
+	os.environ.setdefault('SAM2_MCP_BACKEND_URL', 'mock'); \
+	from services.sam2_mcp.service import Sam2Service; \
+	from services.sam2_mcp.settings import reset_settings; \
+	reset_settings(); \
+	svc = Sam2Service(); \
+	r = svc.health_check(); \
+	print(json.dumps(r.model_dump(), indent=2)); \
+	sys.exit(0 if r.ok else 1); \
+	"
+
+sam2-mcp-smoke:
+	@echo "Running SAM2 MCP smoke tests..."
+	$(VENV_PATH)/bin/pytest tests/test_sam2_mcp.py -v --tb=short
