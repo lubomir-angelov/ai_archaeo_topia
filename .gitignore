@@ -226,3 +226,4 @@ tools/cvat/
 .claude/*
 opencode.json*
 data/
+artifacts/
