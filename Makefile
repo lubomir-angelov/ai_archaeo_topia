@@ -11,6 +11,7 @@ SHELL := /usr/bin/env bash
 .PHONY: lint format-check test compile
 .PHONY: sam2-mcp-run sam2-mcp-health sam2-mcp-smoke sam2-mcp-contract-test sam2-mcp-mock-smoke sam2-mcp-live-health
 .PHONY: sam2-backend-run sam2-backend-health sam2-backend-mock-smoke sam2-backend-contract-test
+.PHONY: annotation-pdf-sam2-mock-dry-run annotation-pdf-sam2-mock-run annotation-pdf-sam2-validate
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeo_topia
@@ -354,6 +355,7 @@ lint:
 	$(VENV_PATH)/bin/ruff check src/cvat_sam2_mcp src/services tests
 	$(VENV_PATH)/bin/ruff format --check src/cvat_sam2_mcp src/services tests
 	$(VENV_PATH)/bin/ruff check src/services/sam2_backend
+	$(VENV_PATH)/bin/ruff check src/services/annotation_pipeline
 
 format-check:
 	$(VENV_PATH)/bin/ruff format src/cvat_sam2_mcp src/services tests src/services/sam2_backend
@@ -508,3 +510,58 @@ sam2-backend-mock-smoke:
 sam2-backend-contract-test:
 	@echo "Running SAM2 backend contract tests..."
 	$(VENV_PATH)/bin/pytest tests/test_sam2_backend.py -v --tb=short
+
+# ---- PDF → SAM2 Annotation Pipeline ----
+
+annotation-pdf-sam2-mock-dry-run:
+	@if [ -z "${PDF_PATH}" ]; then \
+		echo "Usage: make annotation-pdf-sam2-mock-dry-run PDF_PATH=/path/to/file.pdf [OUTPUT_ROOT=...] [RUN_ID=...] [SAM2_MCP_URL=mock]"; \
+		exit 1; \
+	fi
+	@set -euxo pipefail; \
+	output_root="${OUTPUT_ROOT:-./data/annotations/runs}"; \
+	run_id="${RUN_ID:-dry_run_$$(date +%Y%m%d_%H%M%S)}"; \
+	sam2_mcp_url="${SAM2_MCP_URL:-mock}"; \
+	echo "PDF: ${PDF_PATH}"; \
+	echo "Output: ${output_root}"; \
+	echo "Run ID: ${run_id}"; \
+	echo "SAM2 MCP URL: ${sam2_mcp_url}"; \
+	$(PYTHON) -m services.annotation_pipeline.pdf_sam2_runner \
+		--pdf "${PDF_PATH}" \
+		--output-root "${output_root}" \
+		--run-id "${run_id}" \
+		--sam2-mcp-url "${sam2_mcp_url}" \
+		--sam2-mode mock \
+		--dry-run true \
+		--log-level INFO
+
+annotation-pdf-sam2-mock-run:
+	@if [ -z "${PDF_PATH}" ]; then \
+		echo "Usage: make annotation-pdf-sam2-mock-run PDF_PATH=/path/to/file.pdf [OUTPUT_ROOT=...] [RUN_ID=...] [SAM2_MCP_URL=mock]"; \
+		exit 1; \
+	fi
+	@set -euxo pipefail; \
+	output_root="${OUTPUT_ROOT:-./data/annotations/runs}"; \
+	run_id="${RUN_ID:-run_$$(date +%Y%m%d_%H%M%S)}"; \
+	sam2_mcp_url="${SAM2_MCP_URL:-mock}"; \
+	echo "PDF: ${PDF_PATH}"; \
+	echo "Output: ${output_root}"; \
+	echo "Run ID: ${run_id}"; \
+	echo "SAM2 MCP URL: ${sam2_mcp_url}"; \
+	$(PYTHON) -m services.annotation_pipeline.pdf_sam2_runner \
+		--pdf "${PDF_PATH}" \
+		--output-root "${output_root}" \
+		--run-id "${run_id}" \
+		--sam2-mcp-url "${sam2_mcp_url}" \
+		--sam2-mode mock \
+		--dry-run false \
+		--log-level INFO
+
+annotation-pdf-sam2-validate:
+	@if [ -z "${CSV_PATH}" ]; then \
+		echo "Usage: make annotation-pdf-sam2-validate CSV_PATH=/path/to/annotation_results.csv"; \
+		exit 1; \
+	fi
+	@set -euxo pipefail; \
+	echo "Validating: ${CSV_PATH}"; \
+	$(PYTHON) -m src.validate_annotation_run --csv "${CSV_PATH}"
