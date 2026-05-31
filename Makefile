@@ -467,7 +467,7 @@ sam2-mcp-contract-test:
 
 sam2-mcp-live-health:
 	@echo "Checking live SAM2 backend health..."
-	@backend_url="$${SAM2_MCP_BACKEND_URL:-http://127.0.0.1:8080}"; \
+	@backend_url="$${SAM2_MCP_BACKEND_URL:-http://127.0.0.1:8181}"; \
 	echo "Backend URL: $$backend_url"; \
 	curl -sf --max-time 10 "$$backend_url/health" 2>/dev/null | $(PYTHON) -m json.tool && \
 		echo "Backend is healthy" || \
@@ -479,12 +479,12 @@ sam2-backend-run:
 	@echo "Starting SAM2 backend service (HTTP)..."
 	@echo "Mode: $${SAM2_BACKEND_MODE:-mock}"
 	@echo "Host: $${SAM2_BACKEND_HOST:-0.0.0.0}"
-	@echo "Port: $${SAM2_BACKEND_PORT:-8080}"
+	@echo "Port: $${SAM2_BACKEND_PORT:-8181}"
 	$(PYTHON) -m services.sam2_backend.main
 
 sam2-backend-health:
 	@echo "Checking SAM2 backend health..."
-	@backend_url="$${SAM2_BACKEND_URL:-http://127.0.0.1:$${SAM2_BACKEND_PORT:-8080}}"; \
+	@backend_url="$${SAM2_BACKEND_URL:-http://127.0.0.1:$${SAM2_BACKEND_PORT:-8181}}"; \
 	echo "Backend URL: $$backend_url"; \
 	curl -sf --max-time 10 "$$backend_url/health" 2>/dev/null | $(PYTHON) -m json.tool && \
 		echo "Backend is healthy" || \

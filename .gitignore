@@ -227,3 +227,4 @@ tools/cvat/
 opencode.json*
 data/
 artifacts/
+_dry_run/

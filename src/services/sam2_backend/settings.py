@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     # Server
     host: str = Field(default="0.0.0.0", description="Bind host")
-    port: int = Field(default=8080, ge=1, le=65535, description="Bind port")
+    port: int = Field(default=8181, ge=1, le=65535, description="Bind port")
 
     # Model
     model_cfg: str = Field(

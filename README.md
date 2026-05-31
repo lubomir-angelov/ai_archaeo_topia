@@ -75,13 +75,13 @@ Mode B: architecture mock
 SAM2_BACKEND_MODE=mock make sam2-backend-run
 
 # Terminal 2
-export SAM2_MCP_BACKEND_URL="http://127.0.0.1:8080"
+export SAM2_MCP_BACKEND_URL="http://127.0.0.1:8181"
 make sam2-mcp-run
 
 # Terminal 3
 export PDF_PATH="path/to/input.pdf"
 export OUTPUT_ROOT="data/annotations/runs"
 export RUN_ID="manual_pdf_seed_001"
-export SAM2_MCP_URL="http://127.0.0.1:<actual_sam2_mcp_port>"
+export SAM2_MCP_URL="http://127.0.0.1:8181"
 make annotation-pdf-sam2-mock-dry-run
 ```

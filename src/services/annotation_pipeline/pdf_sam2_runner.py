@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import io
 import logging
 import sys
 from datetime import UTC, datetime
@@ -107,8 +108,16 @@ def extract_clips_from_pdf(
                 img_bytes = pix.tobytes("png")
                 pil_img = Image.open(img_bytes)
             except Exception as e:
-                logger.warning("Failed to extract image xref=%d: %s", xref, e)
-                continue
+                first_error = e
+                try:
+                    img_base = doc.extract_image(xref)
+                    raw = img_base["image"]
+                    pil_img = Image.open(io.BytesIO(raw))
+                except Exception:
+                    logger.warning(
+                        "Failed to extract image xref=%d: %s", xref, first_error
+                    )
+                    continue
 
             # Parse metadata from page text
             parsed = _parse_page_text(text)

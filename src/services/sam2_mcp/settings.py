@@ -20,7 +20,7 @@ class Settings(BaseSettings):
 
     # SAM2 backend
     backend_url: str = Field(
-        default="http://127.0.0.1:8080",
+        default="http://127.0.0.1:8181",
         description="HTTP endpoint of the SAM2 inference backend",
     )
     backend_timeout: float = Field(

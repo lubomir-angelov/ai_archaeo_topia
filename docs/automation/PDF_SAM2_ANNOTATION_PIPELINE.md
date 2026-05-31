@@ -61,7 +61,7 @@ src/services/annotation_pipeline/
 
 2. SAM2 MCP service (optional when using `mock`):
    ```bash
-   export SAM2_MCP_BACKEND_URL="http://127.0.0.1:8080"
+   export SAM2_MCP_BACKEND_URL="http://127.0.0.1:8181"
    make sam2-mcp-run
    ```
 
@@ -203,7 +203,7 @@ The runner validates:
 
 ### Real SAM2
 - Deploy SAM2 backend with GPU: `SAM2_BACKEND_MODE=sam2 make sam2-backend-run`
-- Point pipeline to live backend: `--sam2-mcp-url http://127.0.0.1:8080`
+- Point pipeline to live backend: `--sam2-mcp-url http://127.0.0.1:8181`
 - Evaluate proposal quality against manual annotations
 
 ### CVAT review/import/export

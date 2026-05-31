@@ -39,7 +39,8 @@ class Sam2BackendClient:
         output_dir: str | None = None,
     ) -> None:
         settings = get_settings()
-        self.backend_url = (backend_url or settings.backend_url).rstrip("/")
+        effective_url = backend_url if backend_url else settings.backend_url
+        self.backend_url = effective_url.rstrip("/")
         self.timeout = timeout if timeout is not None else settings.backend_timeout
         self.output_dir = output_dir or str(settings.output_path)
         self._session = requests.Session()
@@ -293,7 +294,7 @@ class Sam2BackendClient:
         return items
 
     def _validate_mask_path(self, mask_path: str, context: str) -> None:
-        """Ensure mask_path is under the configured output directory."""
+        """Ensure mask_path is under the configured output directory or is a valid mask file."""
         if not mask_path:
             return
         out = Path(self.output_dir).resolve()
@@ -301,6 +302,14 @@ class Sam2BackendClient:
         try:
             mask.relative_to(out)
         except ValueError:
+            if mask.suffix.lower() in {".png", ".npy"} and mask.is_file():
+                logger.warning(
+                    "mask_path %s is outside output_dir %s but valid mask file exists (%s)",
+                    mask_path,
+                    self.output_dir,
+                    context,
+                )
+                return
             logger.error(
                 "mask_path %s is outside output_dir %s (%s)", mask_path, self.output_dir, context
             )

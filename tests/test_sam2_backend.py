@@ -91,7 +91,7 @@ class TestBackendSettings:
         assert s.mode == "mock"
         assert s.device == "auto"
         assert s.host == "0.0.0.0"
-        assert s.port == 8080
+        assert s.port == 8181
 
     def test_env_vars(self) -> None:
         with patch.dict(

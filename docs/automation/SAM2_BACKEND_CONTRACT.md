@@ -218,7 +218,7 @@ The MCP client is configured via environment variables:
 
 | Variable                     | Default                  | Description                              |
 |------------------------------|--------------------------|------------------------------------------|
-| `SAM2_MCP_BACKEND_URL`       | `http://127.0.0.1:8080`  | Backend HTTP endpoint or `mock`          |
+| `SAM2_MCP_BACKEND_URL`       | `http://127.0.0.1:8181`  | Backend HTTP endpoint or `mock`          |
 | `SAM2_MCP_BACKEND_TIMEOUT`   | `120.0`                  | Request timeout in seconds               |
 | `SAM2_MCP_OUTPUT_DIR`        | `./artifacts/sam2_mcp`   | Directory for generated artifacts        |
 | `SAM2_MCP_MAX_IMAGE_SIZE`    | `10000`                  | Maximum image dimension in pixels        |
@@ -231,10 +231,10 @@ for local testing without a GPU.
 
 ```bash
 # Health check
-curl -s http://localhost:8080/health | python3 -m json.tool
+curl -s http://localhost:8181/health | python3 -m json.tool
 
 # Bounding-box segmentation
-curl -s -X POST http://localhost:8080/segment \
+curl -s -X POST http://localhost:8181/segment \
   -H "Content-Type: application/json" \
   -d '{
     "image_path": "/data/maps/map_001.png",
@@ -245,7 +245,7 @@ curl -s -X POST http://localhost:8080/segment \
   }' | python3 -m json.tool
 
 # Point segmentation
-curl -s -X POST http://localhost:8080/segment \
+curl -s -X POST http://localhost:8181/segment \
   -H "Content-Type: application/json" \
   -d '{
     "image_path": "/data/maps/map_001.png",
@@ -257,7 +257,7 @@ curl -s -X POST http://localhost:8080/segment \
   }' | python3 -m json.tool
 
 # Proposal generation
-curl -s -X POST http://localhost:8080/propose \
+curl -s -X POST http://localhost:8181/propose \
   -H "Content-Type: application/json" \
   -d '{
     "image_path": "/data/maps/map_001.png",

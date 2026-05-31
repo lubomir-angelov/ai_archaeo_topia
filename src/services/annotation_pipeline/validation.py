@@ -138,7 +138,6 @@ def validate_run(
                     "image_path",
                     "clip_image_path",
                     "review_image_path",
-                    "mask_path",
                 ]:
                     p = row.get(path_field, "")
                     if p:
@@ -146,6 +145,22 @@ def validate_run(
                             Path(p).resolve().relative_to(run_dir.resolve())
                         except ValueError:
                             errors.append(f"Path {path_field}={p} escapes run directory {run_dir}")
+
+                # mask_path may live outside run_dir (backend artifact dir)
+                mask_p = row.get("mask_path", "")
+                if mask_p:
+                    mask_resolved = Path(mask_p).resolve()
+                    try:
+                        mask_resolved.relative_to(run_dir.resolve())
+                    except ValueError:
+                        if mask_resolved.is_file():
+                            warnings.append(
+                                f"mask_path outside run_dir but file exists: {mask_p}"
+                            )
+                        else:
+                            errors.append(
+                                f"mask_path={mask_p} escapes run_dir and file not found"
+                            )
 
     except Exception as e:
         raise ValidationError(f"Failed to validate CSV: {e}") from e

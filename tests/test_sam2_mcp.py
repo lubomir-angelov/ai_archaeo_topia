@@ -84,7 +84,7 @@ def image_dir_with_files(tmp_path: Path) -> Path:
 class TestSettings:
     def test_defaults(self) -> None:
         s = Settings()
-        assert s.backend_url == "http://127.0.0.1:8080"
+        assert s.backend_url == "http://127.0.0.1:8181"
         assert s.backend_timeout == 120.0
         assert s.max_image_size == 10_000
         assert s.log_level == "INFO"

@@ -34,10 +34,10 @@ image processing, mask generation, and proposal generation.
 SAM2_BACKEND_MODE=mock make sam2-backend-run
 
 # Health check
-curl http://localhost:8080/health
+curl http://localhost:8181/health
 
 # Segment with bbox
-curl -s -X POST http://localhost:8080/segment \
+curl -s -X POST http://localhost:8181/segment \
   -H "Content-Type: application/json" \
   -d '{
     "image_path": "/path/to/image.png",
@@ -47,7 +47,7 @@ curl -s -X POST http://localhost:8080/segment \
   }' | python3 -m json.tool
 
 # Proposals
-curl -s -X POST http://localhost:8080/propose \
+curl -s -X POST http://localhost:8181/propose \
   -H "Content-Type: application/json" \
   -d '{
     "image_path": "/path/to/image.png",
@@ -76,7 +76,7 @@ make sam2-backend-run
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SAM2_BACKEND_HOST` | `0.0.0.0` | Bind host |
-| `SAM2_BACKEND_PORT` | `8080` | Bind port |
+| `SAM2_BACKEND_PORT` | `8181` | Bind port |
 | `SAM2_BACKEND_MODE` | `mock` | `mock` or `sam2` |
 | `SAM2_BACKEND_DEVICE` | `auto` | `auto`, `cuda`, or `cpu` |
 | `SAM2_BACKEND_MODEL_CFG` | `` | SAM2 model config file path |
@@ -185,7 +185,7 @@ Generate candidate proposals. See `SAM2_BACKEND_CONTRACT.md` for full spec.
 SAM2_BACKEND_MODE=mock make sam2-backend-run
 
 # In another terminal, configure MCP client
-export SAM2_MCP_BACKEND_URL=http://127.0.0.1:8080
+export SAM2_MCP_BACKEND_URL=http://127.0.0.1:8181
 
 # Start MCP server
 make sam2-mcp-run
