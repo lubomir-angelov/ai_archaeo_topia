@@ -2,6 +2,9 @@
 
 Validates inputs, calls the backend client, converts masks to polygons,
 and writes output artifacts under the configured output directory.
+
+SAM 2 MCP is a **map-only segmentation service**.  It operates only on
+image inputs that represent maps, map tiles, or cropped map regions.
 """
 
 from __future__ import annotations
@@ -15,16 +18,24 @@ from typing import Any
 from PIL import Image
 
 from .client import Sam2BackendClient
-from .errors import BackendError, ImageError, OutputError, ValidationError
+from .errors import (
+    BackendError,
+    ImageError,
+    OutputError,
+    ValidationError,
+)
 from .schemas import (
+    CoordinateSpace,
     GenerateProposalsInput,
     HealthOutput,
+    InputKind,
     ProposalsOutput,
     SegmentationItem,
     SegmentBoxInput,
     SegmentBoxOutput,
     SegmentPointsInput,
     SegmentPointsOutput,
+    TileMetadata,
 )
 from .settings import get_settings
 
@@ -61,27 +72,27 @@ class Sam2Service:
     # ── box segmentation ─────────────────────────────────────────
 
     def segment_box(self, inp: SegmentBoxInput) -> SegmentBoxOutput:
-        """Segment an image using a bounding-box prompt."""
+        """Segment a map image using a bounding-box prompt."""
         self._validate_image_path(inp.image_path)
         self._validate_bbox(inp.bbox, inp.image_path)
         item = self.client.segment_box(inp.image_path, inp.bbox, inp.label)
         self._validate_segmentation_item(item, "segment_box")
-        return self._save_and_return_box(item, inp.image_path)
+        return self._save_and_return_box(item, inp)
 
     # ── point segmentation ───────────────────────────────────────
 
     def segment_points(self, inp: SegmentPointsInput) -> SegmentPointsOutput:
-        """Segment an image using point prompts."""
+        """Segment a map image using point prompts."""
         self._validate_image_path(inp.image_path)
         self._validate_points(inp.points, inp.point_labels, inp.image_path)
         item = self.client.segment_points(inp.image_path, inp.points, inp.point_labels, inp.label)
         self._validate_segmentation_item(item, "segment_points")
-        return self._save_and_return_points(item, inp.image_path, inp.points, inp.point_labels)
+        return self._save_and_return_points(item, inp)
 
     # ── proposals ────────────────────────────────────────────────
 
     def generate_proposals(self, inp: GenerateProposalsInput) -> ProposalsOutput:
-        """Generate candidate segmentation proposals."""
+        """Generate candidate segmentation proposals for map images."""
         if inp.image_path is None and inp.image_dir is None:
             raise ValidationError("Either image_path or image_dir must be provided")
         if inp.image_path is not None and inp.image_dir is not None:
@@ -105,12 +116,19 @@ class Sam2Service:
                 )
                 for item in items:
                     self._validate_segmentation_item(item, "generate_proposals")
+                    item.artifact_id = inp.artifact_id
+                    item.run_id = inp.run_id
                 all_items.extend(items)
             except BackendError as exc:
                 logger.warning("Backend error for %s: %s", img_path, exc)
 
         logger.info("Generated %d proposals for %d image(s)", len(all_items), len(image_paths))
-        return ProposalsOutput(items=all_items)
+        return ProposalsOutput(
+            items=all_items,
+            artifact_id=inp.artifact_id,
+            run_id=inp.run_id,
+            input_kind=inp.input_kind,
+        )
 
     # ── output validation ────────────────────────────────────────
 
@@ -255,8 +273,11 @@ class Sam2Service:
         logger.info("Wrote mask to %s", path)
         return str(path)
 
-    def _save_and_return_box(self, item: SegmentationItem, image_path: str) -> SegmentBoxOutput:
+    def _save_and_return_box(
+        self, item: SegmentationItem, inp: SegmentBoxInput
+    ) -> SegmentBoxOutput:
         """Persist mask (if available) and return structured output."""
+        image_path = inp.image_path
         mask_path = item.mask_path
         if not mask_path:
             prompt_h = self._prompt_hash(item.bbox)
@@ -272,6 +293,8 @@ class Sam2Service:
             except Exception as exc:
                 logger.warning("Failed to write mask: %s", exc)
 
+        coord_space = self._resolve_coordinate_space(inp.input_kind, inp.tile_metadata)
+
         result = SegmentBoxOutput(
             image_path=item.image_path,
             label=item.label,
@@ -281,32 +304,37 @@ class Sam2Service:
             confidence=item.confidence,
             source="sam2_mcp",
             status="pending_review",
+            artifact_id=inp.artifact_id,
+            run_id=inp.run_id,
+            coordinate_space=coord_space,
+            tile_metadata=inp.tile_metadata,
+            class_hint=inp.class_hint,
         )
         logger.info(
-            "segment_box result: image=%s mask=%s confidence=%.4f",
+            "segment_box result: image=%s mask=%s confidence=%.4f artifact=%s",
             result.image_path,
             mask_path,
             result.confidence,
+            inp.artifact_id,
         )
         return result
 
     def _save_and_return_points(
         self,
         item: SegmentationItem,
-        image_path: str,
-        points: list[list[float]],
-        point_labels: list[int],
+        inp: SegmentPointsInput,
     ) -> SegmentPointsOutput:
         """Persist mask (if available) and return structured output."""
+        image_path = inp.image_path
         mask_path = item.mask_path
         if not mask_path:
-            prompt_h = self._prompt_hash(str(points) + str(point_labels))
+            prompt_h = self._prompt_hash(str(inp.points) + str(inp.point_labels))
             fname = self._make_mask_filename(image_path, prompt_h)
             try:
                 img = Image.open(image_path)
                 w, h = img.size
                 mask = Image.new("L", (w, h), 0)
-                for pt in points:
+                for pt in inp.points:
                     px, py = int(pt[0]), int(pt[1])
                     if 0 <= px < w and 0 <= py < h:
                         mask.putpixel((px, py), 255)
@@ -314,21 +342,39 @@ class Sam2Service:
             except Exception as exc:
                 logger.warning("Failed to write mask: %s", exc)
 
+        coord_space = self._resolve_coordinate_space(inp.input_kind, inp.tile_metadata)
+
         result = SegmentPointsOutput(
             image_path=item.image_path,
             label=item.label,
-            points=points,
-            point_labels=point_labels,
+            points=inp.points,
+            point_labels=inp.point_labels,
             mask_path=mask_path,
             polygon=item.polygon,
             confidence=item.confidence,
             source="sam2_mcp",
             status="pending_review",
+            artifact_id=inp.artifact_id,
+            run_id=inp.run_id,
+            coordinate_space=coord_space,
+            tile_metadata=inp.tile_metadata,
+            class_hint=inp.class_hint,
         )
         logger.info(
-            "segment_points result: image=%s mask=%s confidence=%.4f",
+            "segment_points result: image=%s mask=%s confidence=%.4f artifact=%s",
             result.image_path,
             mask_path,
             result.confidence,
+            inp.artifact_id,
         )
         return result
+
+    @staticmethod
+    def _resolve_coordinate_space(
+        input_kind: InputKind,
+        tile_metadata: TileMetadata | None,
+    ) -> CoordinateSpace:
+        """Determine coordinate space from input kind and tile metadata."""
+        if input_kind == InputKind.MAP_TILE and tile_metadata is not None:
+            return CoordinateSpace.TILE_PIXEL
+        return CoordinateSpace.IMAGE_PIXEL

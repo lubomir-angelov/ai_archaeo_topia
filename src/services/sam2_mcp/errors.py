@@ -21,3 +21,12 @@ class BackendError(Sam2McpError):
 
 class OutputError(Sam2McpError):
     """Raised when writing output artifacts fails."""
+
+
+class MapOnlyError(Sam2McpError):
+    """Raised when a non-map input is provided to the map-only service.
+
+    SAM 2 MCP accepts only map images, map tiles, and map crops.
+    PDFs, documents, and non-map images must be rejected at the
+    boundary and routed to the appropriate service (e.g. OCR MCP).
+    """

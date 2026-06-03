@@ -1,12 +1,25 @@
 #!/usr/bin/env python3
 """PDF → SAM2 seed annotation pipeline runner.
 
-End-to-end pipeline:
-  PDF → pdf_clip_extractor → clip images + metadata
-    → sam2_mcp (generate_proposals)
-    → sam2_backend mock mode
-    → annotation CSV
-    → validate_annotation_run
+End-to-end pipeline with clear boundaries:
+
+  1. PDF PREPROCESSING (this module):
+     PDF → pdf_clip_extractor → clip images + metadata
+     This step extracts images from the PDF.  SAM 2 MCP never sees
+     the raw PDF; it only receives the extracted map images.
+
+  2. SAM 2 MAP SEGMENTATION (sam2_mcp / sam2_backend):
+     clip images → sam2_mcp (generate_proposals) → masks + polygons
+     SAM 2 MCP operates only on the extracted map images.
+
+  3. ANNOTATION OUTPUT (this module):
+     masks + polygons + metadata → annotation CSV
+     → validate_annotation_run
+
+Architecture boundary:
+  - PDF handling: this module (OCR belongs to DeepSeek OCR MCP)
+  - Map segmentation: SAM 2 MCP (map-only, no PDF/document support)
+  - Reasoning/decisions: Qwen geospatial agent
 
 Usage:
   python -m services.annotation_pipeline.pdf_sam2_runner \
@@ -295,10 +308,12 @@ def call_sam2_proposals(
     output_dir: str,
     max_proposals: int = 50,
     label_hint: str = "mound",
+    run_id: str = "",
 ) -> list[Sam2Proposal]:
     """Call SAM2 MCP client to generate proposals.
 
     Uses Sam2BackendClient directly (same client used by sam2_mcp service).
+    SAM 2 MCP receives only the extracted map image, never the raw PDF.
 
     Args:
         clip: Clip metadata with image path.
@@ -306,6 +321,7 @@ def call_sam2_proposals(
         output_dir: Output directory for masks.
         max_proposals: Max proposals per image.
         label_hint: Label hint for proposals.
+        run_id: Run identifier for provenance tracking.
 
     Returns:
         List of SAM2 proposals.
@@ -572,6 +588,7 @@ def run_pipeline(
                 backend_url=sam2_mcp_url,
                 output_dir=str(run_dir / "masks"),
                 max_proposals=max_proposals,
+                run_id=run_id,
             )
             proposals_map[clip.sample_id] = props
             total_proposals += len(props)

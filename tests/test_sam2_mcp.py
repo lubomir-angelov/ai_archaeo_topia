@@ -209,12 +209,11 @@ class TestService:
             service.segment_box(inp)
 
     def test_segment_box_missing_image(self, service: Sam2Service) -> None:
-        inp = SegmentBoxInput(
-            image_path="/nonexistent/image.png",
-            bbox=[0, 0, 50, 50],
-        )
-        with pytest.raises(ImageError, match="not found"):
-            service.segment_box(inp)
+        with pytest.raises(ValidationError, match="not found"):
+            SegmentBoxInput(
+                image_path="/nonexistent/image.png",
+                bbox=[0, 0, 50, 50],
+            )
 
     def test_segment_points_success(self, service: Sam2Service, small_image: Path) -> None:
         inp = SegmentPointsInput(
@@ -656,3 +655,367 @@ class TestBackendSchemas:
             point_labels=[1],
         )
         assert r.prompt_type == "points"
+
+
+# ── Map-only boundary tests ──────────────────────────────────────
+
+
+class TestMapOnlyBoundary:
+    """Tests that SAM 2 MCP enforces map-only input boundary."""
+
+    def test_rejects_pdf_input(self, tmp_path: Path) -> None:
+        """PDF input must be rejected by map-only validation."""
+        from services.sam2_mcp.schemas import SegmentBoxInput
+
+        pdf_path = tmp_path / "map.pdf"
+        pdf_path.write_text("%PDF-1.4 fake")
+
+        with pytest.raises(Exception, match="not a map image"):
+            SegmentBoxInput(
+                image_path=str(pdf_path),
+                bbox=[10, 10, 50, 50],
+            )
+
+    def test_rejects_docx_input(self, tmp_path: Path) -> None:
+        """DOCX input must be rejected by map-only validation."""
+        from services.sam2_mcp.schemas import SegmentBoxInput
+
+        docx_path = tmp_path / "document.docx"
+        docx_path.write_text("fake docx")
+
+        with pytest.raises(Exception, match="not a map image"):
+            SegmentBoxInput(
+                image_path=str(docx_path),
+                bbox=[10, 10, 50, 50],
+            )
+
+    def test_rejects_txt_input(self, tmp_path: Path) -> None:
+        """Text file input must be rejected."""
+        from services.sam2_mcp.schemas import SegmentBoxInput
+
+        txt_path = tmp_path / "readme.txt"
+        txt_path.write_text("not an image")
+
+        with pytest.raises(Exception, match="not a map image"):
+            SegmentBoxInput(
+                image_path=str(txt_path),
+                bbox=[10, 10, 50, 50],
+            )
+
+    def test_accepts_png_input(self, tmp_path: Path) -> None:
+        """PNG image should be accepted as valid map image."""
+        from PIL import Image
+
+        from services.sam2_mcp.schemas import SegmentBoxInput
+
+        img = Image.new("RGB", (100, 100), color=(128, 128, 128))
+        img_path = tmp_path / "map_tile.png"
+        img.save(str(img_path))
+
+        inp = SegmentBoxInput(
+            image_path=str(img_path),
+            bbox=[10, 10, 50, 50],
+        )
+        assert inp.image_path == str(img_path)
+
+    def test_accepts_jpeg_input(self, tmp_path: Path) -> None:
+        """JPEG image should be accepted as valid map image."""
+        from PIL import Image
+
+        from services.sam2_mcp.schemas import SegmentBoxInput
+
+        img = Image.new("RGB", (100, 100), color=(128, 128, 128))
+        img_path = tmp_path / "map_tile.jpg"
+        img.save(str(img_path))
+
+        inp = SegmentBoxInput(
+            image_path=str(img_path),
+            bbox=[10, 10, 50, 50],
+        )
+        assert inp.image_path == str(img_path)
+
+    def test_accepts_tiff_input(self, tmp_path: Path) -> None:
+        """TIFF image should be accepted as valid map image."""
+        from PIL import Image
+
+        from services.sam2_mcp.schemas import SegmentBoxInput
+
+        img = Image.new("RGB", (100, 100), color=(128, 128, 128))
+        img_path = tmp_path / "map_tile.tiff"
+        img.save(str(img_path))
+
+        inp = SegmentBoxInput(
+            image_path=str(img_path),
+            bbox=[10, 10, 50, 50],
+        )
+        assert inp.image_path == str(img_path)
+
+    def test_points_input_rejects_pdf(self, tmp_path: Path) -> None:
+        """Point prompts must also reject PDF input."""
+        from services.sam2_mcp.schemas import SegmentPointsInput
+
+        pdf_path = tmp_path / "map.pdf"
+        pdf_path.write_text("%PDF-1.4 fake")
+
+        with pytest.raises(Exception, match="not a map image"):
+            SegmentPointsInput(
+                image_path=str(pdf_path),
+                points=[[30, 30]],
+                point_labels=[1],
+            )
+
+    def test_proposals_input_rejects_pdf(self, tmp_path: Path) -> None:
+        """Proposals input must also reject PDF input."""
+        from services.sam2_mcp.schemas import GenerateProposalsInput
+
+        pdf_path = tmp_path / "map.pdf"
+        pdf_path.write_text("%PDF-1.4 fake")
+
+        with pytest.raises(Exception, match="not a map image"):
+            GenerateProposalsInput(
+                image_path=str(pdf_path),
+            )
+
+
+# ── Tile metadata tests ──────────────────────────────────────────
+
+
+class TestTileMetadata:
+    """Tests for tile metadata and coordinate space handling."""
+
+    def test_tile_metadata_creation(self) -> None:
+        from services.sam2_mcp.schemas import TileMetadata
+
+        tm = TileMetadata(
+            tile_id="tile_001",
+            tile_offset_x=1024,
+            tile_offset_y=2048,
+            tile_width=1024,
+            tile_height=1024,
+            parent_image_path="/maps/full_map.tif",
+            source_map_sheet="K-35-50",
+        )
+        assert tm.tile_id == "tile_001"
+        assert tm.tile_offset_x == 1024
+        assert tm.parent_image_path == "/maps/full_map.tif"
+
+    def test_box_input_with_tile_metadata(self, tmp_path: Path) -> None:
+        """Box input should accept tile metadata."""
+        from PIL import Image
+
+        from services.sam2_mcp.schemas import InputKind, SegmentBoxInput, TileMetadata
+
+        img = Image.new("RGB", (100, 100), color=(128, 128, 128))
+        img_path = tmp_path / "tile.png"
+        img.save(str(img_path))
+
+        tm = TileMetadata(
+            tile_id="t1",
+            tile_offset_x=0,
+            tile_offset_y=0,
+            tile_width=100,
+            tile_height=100,
+        )
+        inp = SegmentBoxInput(
+            image_path=str(img_path),
+            bbox=[10, 10, 50, 50],
+            input_kind=InputKind.MAP_TILE,
+            tile_metadata=tm,
+            artifact_id="artifact_001",
+            run_id="run_20240101",
+            class_hint="mound",
+        )
+        assert inp.input_kind == InputKind.MAP_TILE
+        assert inp.tile_metadata.tile_id == "t1"
+        assert inp.artifact_id == "artifact_001"
+        assert inp.run_id == "run_20240101"
+        assert inp.class_hint == "mound"
+
+    def test_coordinate_space_resolution_tile(self) -> None:
+        """Tile input with metadata should resolve to tile_pixel."""
+        from services.sam2_mcp.schemas import InputKind, TileMetadata
+        from services.sam2_mcp.service import Sam2Service
+
+        tm = TileMetadata(tile_id="t1")
+        result = Sam2Service._resolve_coordinate_space(InputKind.MAP_TILE, tm)
+        assert result.value == "tile_pixel"
+
+    def test_coordinate_space_resolution_image(self) -> None:
+        """Map image without tile metadata should resolve to image_pixel."""
+        from services.sam2_mcp.schemas import InputKind
+        from services.sam2_mcp.service import Sam2Service
+
+        result = Sam2Service._resolve_coordinate_space(InputKind.MAP_IMAGE, None)
+        assert result.value == "image_pixel"
+
+    def test_coordinate_space_resolution_crop(self) -> None:
+        """Map crop without tile metadata should resolve to image_pixel."""
+        from services.sam2_mcp.schemas import InputKind
+        from services.sam2_mcp.service import Sam2Service
+
+        result = Sam2Service._resolve_coordinate_space(InputKind.MAP_CROP, None)
+        assert result.value == "image_pixel"
+
+
+# ── Provenance tests ─────────────────────────────────────────────
+
+
+class TestProvenance:
+    """Tests for provenance tracking in segmentation output."""
+
+    def test_box_output_has_provenance_fields(self, tmp_path: Path) -> None:
+        """Box output should include artifact_id, run_id, coordinate_space."""
+        from services.sam2_mcp.schemas import (
+            CoordinateSpace,
+            SegmentBoxOutput,
+        )
+
+        out = SegmentBoxOutput(
+            image_path="/tmp/img.png",
+            bbox=[10, 10, 50, 50],
+            polygon=[[10, 10], [50, 10], [50, 50], [10, 50]],
+            artifact_id="artifact_001",
+            run_id="run_20240101",
+            coordinate_space=CoordinateSpace.TILE_PIXEL,
+            class_hint="mound",
+        )
+        assert out.artifact_id == "artifact_001"
+        assert out.run_id == "run_20240101"
+        assert out.coordinate_space == CoordinateSpace.TILE_PIXEL
+        assert out.class_hint == "mound"
+
+    def test_output_derives_wkt(self) -> None:
+        """Output should derive WKT from polygon vertices."""
+        from services.sam2_mcp.schemas import SegmentBoxOutput
+
+        out = SegmentBoxOutput(
+            image_path="/tmp/img.png",
+            bbox=[10, 10, 50, 50],
+            polygon=[[10, 10], [50, 10], [50, 50], [10, 50]],
+        )
+        assert "POLYGON" in out.polygon_wkt
+        assert "10.0" in out.polygon_wkt
+
+    def test_output_derives_geojson(self) -> None:
+        """Output should derive GeoJSON from polygon vertices."""
+        from services.sam2_mcp.schemas import SegmentBoxOutput
+
+        out = SegmentBoxOutput(
+            image_path="/tmp/img.png",
+            bbox=[10, 10, 50, 50],
+            polygon=[[10, 10], [50, 10], [50, 50], [10, 50]],
+        )
+        assert "Feature" in out.polygon_geojson
+        assert "Polygon" in out.polygon_geojson
+
+    def test_proposals_output_has_provenance(self) -> None:
+        """Proposals output should include artifact_id and run_id."""
+        from services.sam2_mcp.schemas import ProposalsOutput
+
+        out = ProposalsOutput(
+            items=[],
+            artifact_id="artifact_001",
+            run_id="run_20240101",
+        )
+        assert out.artifact_id == "artifact_001"
+        assert out.run_id == "run_20240101"
+
+
+# ── WKT and GeoJSON helper tests ─────────────────────────────────
+
+
+class TestWktGeojson:
+    """Tests for WKT and GeoJSON conversion helpers."""
+
+    def test_polygon_to_wkt(self) -> None:
+        from services.sam2_mcp.schemas import polygon_to_wkt
+
+        poly = [[0, 0], [10, 0], [10, 10], [0, 10]]
+        wkt = polygon_to_wkt(poly)
+        assert wkt == "POLYGON((0 0 10 0 10 10 0 10))"
+
+    def test_polygon_to_wkt_empty(self) -> None:
+        from services.sam2_mcp.schemas import polygon_to_wkt
+
+        assert polygon_to_wkt([]) == ""
+
+    def test_polygon_to_geojson(self) -> None:
+        from services.sam2_mcp.schemas import polygon_to_geojson
+
+        poly = [[0, 0], [10, 0], [10, 10], [0, 10]]
+        gj = polygon_to_geojson(poly)
+        assert gj["type"] == "Feature"
+        assert gj["geometry"]["type"] == "Polygon"
+
+    def test_polygon_to_geojson_empty(self) -> None:
+        from services.sam2_mcp.schemas import polygon_to_geojson
+
+        assert polygon_to_geojson([]) == {}
+
+
+# ── Enum tests ────────────────────────────────────────────────────
+
+
+class TestEnums:
+    """Tests for InputKind, PromptType, and CoordinateSpace enums."""
+
+    def test_input_kind_values(self) -> None:
+        from services.sam2_mcp.schemas import InputKind
+
+        assert InputKind.MAP_IMAGE.value == "map_image"
+        assert InputKind.MAP_TILE.value == "map_tile"
+        assert InputKind.MAP_CROP.value == "map_crop"
+
+    def test_prompt_type_values(self) -> None:
+        from services.sam2_mcp.schemas import PromptType
+
+        assert PromptType.POINT.value == "point"
+        assert PromptType.BOX.value == "box"
+        assert PromptType.AUTO.value == "auto"
+
+    def test_coordinate_space_values(self) -> None:
+        from services.sam2_mcp.schemas import CoordinateSpace
+
+        assert CoordinateSpace.TILE_PIXEL.value == "tile_pixel"
+        assert CoordinateSpace.IMAGE_PIXEL.value == "image_pixel"
+        assert CoordinateSpace.MAP_PIXEL.value == "map_pixel"
+
+
+# ── Tool definition tests ────────────────────────────────────────
+
+
+class TestToolDefinitions:
+    """Tests that MCP tool definitions match map-only architecture."""
+
+    def test_tools_have_map_only_descriptions(self) -> None:
+        """Tool descriptions should mention map-only constraint."""
+        from services.sam2_mcp.server import TOOLS
+
+        tool_map = {t.name: t for t in TOOLS}
+        box_desc = tool_map["sam2_segment_box"].description
+        assert "map" in box_desc.lower()
+
+        points_desc = tool_map["sam2_segment_points"].description
+        assert "map" in points_desc.lower()
+
+        proposals_desc = tool_map["sam2_generate_proposals"].description
+        assert "map" in proposals_desc.lower()
+
+    def test_tools_have_input_kind_in_schema(self) -> None:
+        """Tool schemas should include input_kind property."""
+        from services.sam2_mcp.server import TOOLS
+
+        tool_map = {t.name: t for t in TOOLS}
+        for tool_name in ["sam2_segment_box", "sam2_segment_points", "sam2_generate_proposals"]:
+            props = tool_map[tool_name].inputSchema.get("properties", {})
+            assert "input_kind" in props, f"{tool_name} missing input_kind"
+
+    def test_tools_have_provenance_fields(self) -> None:
+        """Tool schemas should include artifact_id and run_id."""
+        from services.sam2_mcp.server import TOOLS
+
+        tool_map = {t.name: t for t in TOOLS}
+        for tool_name in ["sam2_segment_box", "sam2_segment_points", "sam2_generate_proposals"]:
+            props = tool_map[tool_name].inputSchema.get("properties", {})
+            assert "artifact_id" in props, f"{tool_name} missing artifact_id"
+            assert "run_id" in props, f"{tool_name} missing run_id"

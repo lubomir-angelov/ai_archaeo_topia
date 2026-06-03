@@ -1,4 +1,9 @@
-"""MCP server exposing SAM2 segmentation tools via stdio transport.
+"""MCP server exposing SAM2 map-only segmentation tools via stdio transport.
+
+SAM 2 MCP is a **map-only segmentation service**.  It operates only on
+image inputs that represent maps, map tiles, or cropped map regions.
+It does **not** handle PDFs, documents, OCR, legend interpretation,
+or generic image analysis.
 
 Usage:
     python -m services.sam2_mcp.server
@@ -37,15 +42,20 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="sam2_segment_box",
-        description="Segment an image using a bounding-box prompt. "
-        "Returns mask path, polygon, and confidence. "
-        "All outputs are marked pending_review.",
+        description=(
+            "Segment a **map image, map tile, or map crop** using a "
+            "bounding-box prompt.  Returns mask path, polygon (vertices, "
+            "WKT, GeoJSON), bbox, confidence, and provenance metadata. "
+            "Accepts only map imagery (PNG, JPEG, TIFF, BMP, WebP). "
+            "Rejects PDFs, documents, and non-map images. "
+            "All outputs are marked pending_review."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "image_path": {
                     "type": "string",
-                    "description": "Path to the input image file.",
+                    "description": "Path to the map image file.",
                 },
                 "bbox": {
                     "type": "array",
@@ -56,21 +66,50 @@ TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Optional label for the segmentation.",
                 },
+                "input_kind": {
+                    "type": "string",
+                    "enum": ["map_image", "map_tile", "map_crop"],
+                    "description": "Kind of map input. Default: map_image.",
+                },
+                "artifact_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the source artifact.",
+                },
+                "run_id": {
+                    "type": "string",
+                    "description": "Run identifier for provenance tracking.",
+                },
+                "class_hint": {
+                    "type": "string",
+                    "description": "Optional class hint from the geospatial agent.",
+                },
+                "tile_metadata": {
+                    "type": ["object", "null"],
+                    "description": "Tile metadata for coordinate mapping.",
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Optional output directory for mask artifacts.",
+                },
             },
             "required": ["image_path", "bbox"],
         },
     ),
     Tool(
         name="sam2_segment_points",
-        description="Segment an image using point prompts. "
-        "Returns mask path, polygon, and confidence. "
-        "All outputs are marked pending_review.",
+        description=(
+            "Segment a **map image, map tile, or map crop** using point "
+            "prompts.  Returns mask path, polygon (vertices, WKT, GeoJSON), "
+            "confidence, and provenance metadata.  Accepts only map imagery "
+            "(PNG, JPEG, TIFF, BMP, WebP).  Rejects PDFs, documents, and "
+            "non-map images.  All outputs are marked pending_review."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "image_path": {
                     "type": "string",
-                    "description": "Path to the input image file.",
+                    "description": "Path to the map image file.",
                 },
                 "points": {
                     "type": "array",
@@ -89,24 +128,53 @@ TOOLS: list[Tool] = [
                     "type": "string",
                     "description": "Optional label for the segmentation.",
                 },
+                "input_kind": {
+                    "type": "string",
+                    "enum": ["map_image", "map_tile", "map_crop"],
+                    "description": "Kind of map input. Default: map_image.",
+                },
+                "artifact_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the source artifact.",
+                },
+                "run_id": {
+                    "type": "string",
+                    "description": "Run identifier for provenance tracking.",
+                },
+                "class_hint": {
+                    "type": "string",
+                    "description": "Optional class hint from the geospatial agent.",
+                },
+                "tile_metadata": {
+                    "type": ["object", "null"],
+                    "description": "Tile metadata for coordinate mapping.",
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Optional output directory for mask artifacts.",
+                },
             },
             "required": ["image_path", "points", "point_labels"],
         },
     ),
     Tool(
         name="sam2_generate_proposals",
-        description="Generate candidate segmentation proposals for an image "
-        "or directory. All outputs are machine-generated and pending_review.",
+        description=(
+            "Generate candidate segmentation proposals for **map images only**. "
+            "Accepts a single map image path or a directory of map images. "
+            "All outputs are machine-generated and marked pending_review. "
+            "Rejects PDFs, documents, and non-map images."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "image_path": {
                     "type": ["string", "null"],
-                    "description": "Path to a single input image.",
+                    "description": "Path to a single map input image.",
                 },
                 "image_dir": {
                     "type": ["string", "null"],
-                    "description": "Path to a directory of images.",
+                    "description": "Path to a directory of map images.",
                 },
                 "label_hint": {
                     "type": "string",
@@ -116,6 +184,31 @@ TOOLS: list[Tool] = [
                     "type": "integer",
                     "description": "Maximum number of proposals to generate.",
                     "default": 50,
+                },
+                "input_kind": {
+                    "type": "string",
+                    "enum": ["map_image", "map_tile", "map_crop"],
+                    "description": "Kind of map input. Default: map_image.",
+                },
+                "artifact_id": {
+                    "type": "string",
+                    "description": "Unique identifier for the source artifact.",
+                },
+                "run_id": {
+                    "type": "string",
+                    "description": "Run identifier for provenance tracking.",
+                },
+                "class_hint": {
+                    "type": "string",
+                    "description": "Optional class hint from the geospatial agent.",
+                },
+                "tile_metadata": {
+                    "type": ["object", "null"],
+                    "description": "Tile metadata for coordinate mapping.",
+                },
+                "output_dir": {
+                    "type": "string",
+                    "description": "Optional output directory for mask artifacts.",
                 },
             },
             "required": [],
@@ -156,34 +249,64 @@ async def handle_tools(
             return _make_result(service.health_check())
 
         if name == "sam2_segment_box":
-            from .schemas import SegmentBoxInput
+            from .schemas import InputKind, SegmentBoxInput, TileMetadata
+
+            tile_meta = None
+            if args.get("tile_metadata"):
+                tile_meta = TileMetadata(**args["tile_metadata"])
 
             inp = SegmentBoxInput(
                 image_path=args["image_path"],
                 bbox=args["bbox"],
                 label=args.get("label", ""),
+                input_kind=args.get("input_kind", InputKind.MAP_IMAGE),
+                artifact_id=args.get("artifact_id", ""),
+                run_id=args.get("run_id", ""),
+                class_hint=args.get("class_hint", ""),
+                tile_metadata=tile_meta,
+                output_dir=args.get("output_dir", ""),
             )
             return _make_result(service.segment_box(inp))
 
         if name == "sam2_segment_points":
-            from .schemas import SegmentPointsInput
+            from .schemas import InputKind, SegmentPointsInput, TileMetadata
+
+            tile_meta = None
+            if args.get("tile_metadata"):
+                tile_meta = TileMetadata(**args["tile_metadata"])
 
             inp = SegmentPointsInput(
                 image_path=args["image_path"],
                 points=args["points"],
                 point_labels=args["point_labels"],
                 label=args.get("label", ""),
+                input_kind=args.get("input_kind", InputKind.MAP_IMAGE),
+                artifact_id=args.get("artifact_id", ""),
+                run_id=args.get("run_id", ""),
+                class_hint=args.get("class_hint", ""),
+                tile_metadata=tile_meta,
+                output_dir=args.get("output_dir", ""),
             )
             return _make_result(service.segment_points(inp))
 
         if name == "sam2_generate_proposals":
-            from .schemas import GenerateProposalsInput
+            from .schemas import GenerateProposalsInput, InputKind, TileMetadata
+
+            tile_meta = None
+            if args.get("tile_metadata"):
+                tile_meta = TileMetadata(**args["tile_metadata"])
 
             inp = GenerateProposalsInput(
                 image_path=args.get("image_path"),
                 image_dir=args.get("image_dir"),
                 label_hint=args.get("label_hint", ""),
                 max_proposals=args.get("max_proposals", 50),
+                input_kind=args.get("input_kind", InputKind.MAP_IMAGE),
+                artifact_id=args.get("artifact_id", ""),
+                run_id=args.get("run_id", ""),
+                class_hint=args.get("class_hint", ""),
+                tile_metadata=tile_meta,
+                output_dir=args.get("output_dir", ""),
             )
             return _make_result(service.generate_proposals(inp))
 

@@ -146,6 +146,16 @@ async def segment(request: Request) -> SegmentResponse:
         except OutputError as exc:
             raise HTTPException(500, detail=str(exc)) from exc
 
+        # Attach provenance fields
+        result["artifact_id"] = req.artifact_id
+        result["run_id"] = req.run_id
+        result["coordinate_space"] = (
+            "tile_pixel"
+            if req.input_kind == "map_tile" and req.tile_metadata
+            else "image_pixel"
+        )
+        result["tile_metadata"] = req.tile_metadata
+
     elif prompt_type == "points":
         try:
             req = SegmentPointsRequest(**body)
@@ -163,7 +173,7 @@ async def segment(request: Request) -> SegmentResponse:
         # Validate points
         _validate_points(req.points, req.point_labels, req.image_path)
 
-        # Resolve output dir
+       # Resolve output dir
         out_dir = _resolve_output_dir(req.output_dir, settings)
 
         # Run inference
@@ -179,6 +189,16 @@ async def segment(request: Request) -> SegmentResponse:
             raise HTTPException(503, detail=str(exc)) from exc
         except OutputError as exc:
             raise HTTPException(500, detail=str(exc)) from exc
+
+        # Attach provenance fields
+        result["artifact_id"] = req.artifact_id
+        result["run_id"] = req.run_id
+        result["coordinate_space"] = (
+            "tile_pixel"
+            if req.input_kind == "map_tile" and req.tile_metadata
+            else "image_pixel"
+        )
+        result["tile_metadata"] = req.tile_metadata
 
     else:
         raise HTTPException(
@@ -230,11 +250,20 @@ async def propose(req: ProposalRequest) -> ProposalResponse:
     except OutputError as exc:
         raise HTTPException(500, detail=str(exc)) from exc
 
-    # Validate each item
+    # Validate each item and attach provenance
+    coord_space = (
+        "tile_pixel"
+        if req.input_kind == "map_tile" and req.tile_metadata
+        else "image_pixel"
+    )
     validated: list[ProposalItem] = []
     for item in items:
         if item.get("mask_path"):
             _validate_mask_path(item["mask_path"], out_dir)
+        item["artifact_id"] = req.artifact_id
+        item["run_id"] = req.run_id
+        item["coordinate_space"] = coord_space
+        item["tile_metadata"] = req.tile_metadata
         validated.append(ProposalItem(**item))
 
     return ProposalResponse(items=validated)
