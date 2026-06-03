@@ -8,8 +8,12 @@ version = "0.1.0"
 description = "MCP server for CVAT + SAM2 GPU auto-annotation of archaeological map images"
 requires-python = ">=3.12"
 dependencies = [
+    "fastapi>=0.115",
     "mcp>=1.20",
+    "Pillow>=10.0",
+    "PyMuPDF>=1.24",
     "requests>=2.31",
+    "uvicorn>=0.30",
     "PyYAML>=6.0",
     "pydantic>=2.10",
     "pydantic-settings>=2.5",
@@ -23,10 +27,11 @@ dev = [
 
 [project.scripts]
 cvat-sam2-mcp = "cvat_sam2_mcp.server:main"
+sam2-mcp = "services.sam2_mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["cvat_sam2_mcp*"]
+include = ["cvat_sam2_mcp*", "services*", "services.*", "annotation_pipeline*"]
 
 [tool.ruff]
 target-version = "py312"

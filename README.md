@@ -54,3 +54,34 @@ CVAT_SAM2_CVAT_USERNAME
 CVAT_SAM2_CVAT_PASSWORD
 ```
 before opencode can authenticate to CVAT.
+
+# SAM2 modes
+```bash
+Mode A: local/internal mock
+- fastest tests
+- no HTTP services
+- useful for unit tests only
+
+Mode B: architecture mock
+- real sam2_mcp process
+- real sam2_backend process
+- backend in SAM2_BACKEND_MODE=mock
+- required for milestone acceptance
+```
+
+## Architecture acceptance path
+```bash
+# Terminal 1
+SAM2_BACKEND_MODE=mock make sam2-backend-run
+
+# Terminal 2
+export SAM2_MCP_BACKEND_URL="http://127.0.0.1:8181"
+make sam2-mcp-run
+
+# Terminal 3
+export PDF_PATH="path/to/input.pdf"
+export OUTPUT_ROOT="data/annotations/runs"
+export RUN_ID="manual_pdf_seed_001"
+export SAM2_MCP_URL="http://127.0.0.1:8181"
+make annotation-pdf-sam2-mock-dry-run
+```

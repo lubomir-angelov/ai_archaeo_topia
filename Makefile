@@ -9,6 +9,9 @@ SHELL := /usr/bin/env bash
 .PHONY: cvat-mcp-run cvat-mcp-health cvat-mcp-smoke
 .PHONY: annotation-dry-run annotation-run
 .PHONY: lint format-check test compile
+.PHONY: sam2-mcp-run sam2-mcp-health sam2-mcp-smoke sam2-mcp-contract-test sam2-mcp-mock-smoke sam2-mcp-live-health
+.PHONY: sam2-backend-run sam2-backend-health sam2-backend-mock-smoke sam2-backend-contract-test
+.PHONY: annotation-pdf-sam2-mock-dry-run annotation-pdf-sam2-mock-run annotation-pdf-sam2-validate
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeo_topia
@@ -64,6 +67,16 @@ help:
 	@echo "  make cvat-mcp-run       - Start the CVAT SAM2 MCP server (stdio)"
 	@echo "  make cvat-mcp-health    - Quick health check of CVAT/SAM2 connectivity"
 	@echo "  make cvat-mcp-smoke     - Run pre-flight smoke tests (no CVAT required)"
+	@echo "  make sam2-mcp-run             - Start the SAM2 MCP service (stdio, standalone)"
+	@echo "  make sam2-mcp-health          - Quick health check of SAM2 MCP service"
+	@echo "  make sam2-mcp-smoke           - Run SAM2 MCP smoke tests"
+	@echo "  make sam2-mcp-mock-smoke      - Run SAM2 MCP mock-mode smoke tests"
+	@echo "  make sam2-mcp-contract-test   - Run backend contract validation tests"
+	@echo "  make sam2-mcp-live-health     - Check live SAM2 backend health via curl"
+	@echo "  make sam2-backend-run             - Start the SAM2 backend HTTP service"
+	@echo "  make sam2-backend-health          - Check SAM2 backend health via curl"
+	@echo "  make sam2-backend-mock-smoke      - Run SAM2 backend mock-mode smoke test"
+	@echo "  make sam2-backend-contract-test   - Run SAM2 backend contract tests"
 	@echo "  make annotation-dry-run - Dry-run the annotation pipeline (INPUT_DIR=...)"
 	@echo "  make annotation-run     - Run the full annotation pipeline (INPUT_DIR=...)"
 	@echo ""
@@ -339,17 +352,19 @@ cce-uninstall:
 PYTHON := $(VENV_PATH)/bin/python3
 
 lint:
-	$(VENV_PATH)/bin/ruff check src/cvat_sam2_mcp tests
-	$(VENV_PATH)/bin/ruff format --check src/cvat_sam2_mcp tests
+	$(VENV_PATH)/bin/ruff check src/cvat_sam2_mcp src/services tests
+	$(VENV_PATH)/bin/ruff format --check src/cvat_sam2_mcp src/services tests
+	$(VENV_PATH)/bin/ruff check src/services/sam2_backend
+	$(VENV_PATH)/bin/ruff check src/services/annotation_pipeline
 
 format-check:
-	$(VENV_PATH)/bin/ruff format src/cvat_sam2_mcp tests
+	$(VENV_PATH)/bin/ruff format src/cvat_sam2_mcp src/services tests src/services/sam2_backend
 
 test:
 	$(VENV_PATH)/bin/pytest tests/ -v
 
 compile:
-	$(VENV_PATH)/bin/python -m compileall src/cvat_sam2_mcp
+	$(VENV_PATH)/bin/python -m compileall src/cvat_sam2_mcp src/services src/services/sam2_backend
 
 cvat-mcp-run:
 	@echo "Starting CVAT SAM2 MCP server (stdio)..."
@@ -403,3 +418,150 @@ annotation-run:
 	r = start_run('$$protocol', '$(INPUT_DIR)', dry_run=False); \
 	print(json.dumps(r, indent=2)); \
 	"
+
+# ---- SAM2 MCP service ----
+
+sam2-mcp-run:
+	@echo "Starting SAM2 MCP server (stdio)..."
+	@echo "Backend: $$(echo ${SAM2_MCP_BACKEND_URL:-mock})"
+	$(PYTHON) -m services.sam2_mcp.server
+
+sam2-mcp-health:
+	@echo "Running SAM2 MCP health check..."
+	@$(PYTHON) -c "\
+	import json, os, sys; \
+	os.environ.setdefault('SAM2_MCP_BACKEND_URL', 'mock'); \
+	from services.sam2_mcp.service import Sam2Service; \
+	from services.sam2_mcp.settings import reset_settings; \
+	reset_settings(); \
+	svc = Sam2Service(); \
+	r = svc.health_check(); \
+	print(json.dumps(r.model_dump(), indent=2)); \
+	sys.exit(0 if r.ok else 1); \
+	"
+
+sam2-mcp-smoke:
+	@echo "Running SAM2 MCP smoke tests..."
+	$(VENV_PATH)/bin/pytest tests/test_sam2_mcp.py -v --tb=short
+
+sam2-mcp-mock-smoke:
+	@echo "Running SAM2 MCP mock-mode smoke tests..."
+	@$(PYTHON) -c "\
+	import json, os, sys; \
+	os.environ['SAM2_MCP_BACKEND_URL'] = 'mock'; \
+	os.environ['SAM2_MCP_OUTPUT_DIR'] = '/tmp/sam2_mcp_smoke'; \
+	from services.sam2_mcp.settings import reset_settings; \
+	reset_settings(); \
+	from services.sam2_mcp.service import Sam2Service; \
+	from services.sam2_mcp.schemas import SegmentBoxInput, SegmentPointsInput, GenerateProposalsInput; \
+	svc = Sam2Service(); \
+	h = svc.health_check(); \
+	assert h.ok, 'health check failed'; \
+	print('  health: OK'); \
+	print(json.dumps(h.model_dump(), indent=2)); \
+	"
+
+sam2-mcp-contract-test:
+	@echo "Running SAM2 MCP backend contract tests..."
+	$(VENV_PATH)/bin/pytest tests/test_sam2_mcp.py -v --tb=short -k "LiveBackendErrors or BackendSchemas"
+
+sam2-mcp-live-health:
+	@echo "Checking live SAM2 backend health..."
+	@backend_url="$${SAM2_MCP_BACKEND_URL:-http://127.0.0.1:8181}"; \
+	echo "Backend URL: $$backend_url"; \
+	curl -sf --max-time 10 "$$backend_url/health" 2>/dev/null | $(PYTHON) -m json.tool && \
+		echo "Backend is healthy" || \
+		echo "Backend is unreachable or returned an error"
+
+# ---- SAM2 Backend service ----
+
+sam2-backend-run:
+	@echo "Starting SAM2 backend service (HTTP)..."
+	@echo "Mode: $${SAM2_BACKEND_MODE:-mock}"
+	@echo "Host: $${SAM2_BACKEND_HOST:-0.0.0.0}"
+	@echo "Port: $${SAM2_BACKEND_PORT:-8181}"
+	$(PYTHON) -m services.sam2_backend.main
+
+sam2-backend-health:
+	@echo "Checking SAM2 backend health..."
+	@backend_url="$${SAM2_BACKEND_URL:-http://127.0.0.1:$${SAM2_BACKEND_PORT:-8181}}"; \
+	echo "Backend URL: $$backend_url"; \
+	curl -sf --max-time 10 "$$backend_url/health" 2>/dev/null | $(PYTHON) -m json.tool && \
+		echo "Backend is healthy" || \
+		echo "Backend is unreachable or returned an error"
+
+sam2-backend-mock-smoke:
+	@echo "Running SAM2 backend mock-mode smoke tests..."
+	@$(PYTHON) -c "\
+	import json, os, sys; \
+	os.environ['SAM2_BACKEND_MODE'] = 'mock'; \
+	os.environ['SAM2_BACKEND_OUTPUT_DIR'] = '/tmp/sam2_backend_smoke'; \
+	from services.sam2_backend.settings import reset_settings; \
+	reset_settings(); \
+	from services.sam2_backend.predictor import SAM2PredictorBackend; \
+	p = SAM2PredictorBackend(); \
+	p.ensure_loaded(); \
+	assert p.is_loaded, 'model should be loaded in mock mode'; \
+	assert p.device == 'mock', 'device should be mock'; \
+	print('  predictor: OK (mode=mock)'); \
+	print(json.dumps({'ok': True, 'device': p.device, 'loaded': p.is_loaded}, indent=2)); \
+	"
+
+sam2-backend-contract-test:
+	@echo "Running SAM2 backend contract tests..."
+	$(VENV_PATH)/bin/pytest tests/test_sam2_backend.py -v --tb=short
+
+# ---- PDF → SAM2 Annotation Pipeline ----
+
+annotation-pdf-sam2-mock-dry-run:
+	@if [ -z "${PDF_PATH}" ]; then \
+		echo "Usage: make annotation-pdf-sam2-mock-dry-run PDF_PATH=/path/to/file.pdf [OUTPUT_ROOT=...] [RUN_ID=...] [SAM2_MCP_URL=mock]"; \
+		exit 1; \
+	fi
+	@set -euxo pipefail; \
+	output_root="${OUTPUT_ROOT:-./data/annotations/runs}"; \
+	run_id="${RUN_ID:-dry_run_$$(date +%Y%m%d_%H%M%S)}"; \
+	sam2_mcp_url="${SAM2_MCP_URL:-mock}"; \
+	echo "PDF: ${PDF_PATH}"; \
+	echo "Output: ${output_root}"; \
+	echo "Run ID: ${run_id}"; \
+	echo "SAM2 MCP URL: ${sam2_mcp_url}"; \
+	$(PYTHON) -m services.annotation_pipeline.pdf_sam2_runner \
+		--pdf "${PDF_PATH}" \
+		--output-root "${output_root}" \
+		--run-id "${run_id}" \
+		--sam2-mcp-url "${sam2_mcp_url}" \
+		--sam2-mode mock \
+		--dry-run true \
+		--log-level INFO
+
+annotation-pdf-sam2-mock-run:
+	@if [ -z "${PDF_PATH}" ]; then \
+		echo "Usage: make annotation-pdf-sam2-mock-run PDF_PATH=/path/to/file.pdf [OUTPUT_ROOT=...] [RUN_ID=...] [SAM2_MCP_URL=mock]"; \
+		exit 1; \
+	fi
+	@set -euxo pipefail; \
+	output_root="${OUTPUT_ROOT:-./data/annotations/runs}"; \
+	run_id="${RUN_ID:-run_$$(date +%Y%m%d_%H%M%S)}"; \
+	sam2_mcp_url="${SAM2_MCP_URL:-mock}"; \
+	echo "PDF: ${PDF_PATH}"; \
+	echo "Output: ${output_root}"; \
+	echo "Run ID: ${run_id}"; \
+	echo "SAM2 MCP URL: ${sam2_mcp_url}"; \
+	$(PYTHON) -m services.annotation_pipeline.pdf_sam2_runner \
+		--pdf "${PDF_PATH}" \
+		--output-root "${output_root}" \
+		--run-id "${run_id}" \
+		--sam2-mcp-url "${sam2_mcp_url}" \
+		--sam2-mode mock \
+		--dry-run false \
+		--log-level INFO
+
+annotation-pdf-sam2-validate:
+	@if [ -z "${CSV_PATH}" ]; then \
+		echo "Usage: make annotation-pdf-sam2-validate CSV_PATH=/path/to/annotation_results.csv"; \
+		exit 1; \
+	fi
+	@set -euxo pipefail; \
+	echo "Validating: ${CSV_PATH}"; \
+	$(PYTHON) -m src.validate_annotation_run --csv "${CSV_PATH}"

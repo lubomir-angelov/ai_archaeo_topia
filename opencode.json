@@ -1,5 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
+  "share": "disabled",
+  "autoupdate": false,
   "permission": {
     "bash": {
       "*": "ask",
@@ -40,10 +43,10 @@
     "context-engine": {
       "type": "local",
       "command": [
-        "/home/naim/.local/bin/cce",
+        "/home/ubuntu/.local/bin/cce",
         "serve",
         "--project-dir",
-        "/home/naim/repos/ai_archaeo_topia"
+        "/home/ubuntu/repos/ai_archaeo_topia"
       ]
     },
     "ocr": {
@@ -68,26 +71,16 @@
       }
     }
   },
-  "model": "llamacpp/Qwen3.6-35B-A3B",
-  "share": "disabled",
-  "autoupdate": false,
   "provider": {
     "llamacpp": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "llama.cpp local",
+      "name": "llama.cpp local Qwen3.6 27B Q4 MTP",
       "options": {
         "baseURL": "http://127.0.0.1:8000/v1"
       },
       "models": {
-        "Qwen3.6-27B-UD-Q5_K_XL": {
-          "name": "Qwen3.6-27B-UD-Q5_K_XL",
-          "limit": {
-            "context": 262144,
-            "output": 16384
-          }
-        },
-        "Qwen3.6-35B-A3B-UD-Q4_K_XL": {
-          "name": "Qwen3.6-35B-A3B-UD-Q4_K_XL",
+        "Qwen3.6-27B-UD-Q4_K_XL": {
+          "name": "Qwen3.6-27B-UD-Q4_K_XL",
           "limit": {
             "context": 262144,
             "output": 16384
@@ -95,7 +88,7 @@
         }
       }
     }
-},
+  },
   "instructions": [
     "AGENTS.md"
   ],
@@ -117,14 +110,15 @@
       "uploads/**",
       "tmp/**",
       "logs/**",
-      ".agent/**"
+      ".agent/**",
+      "artifacts/**"
     ]
   },
   "agent": {
     "build": {
-      "description": "Primary implementation agent for gkrp_data_portal.",
+      "description": "Primary implementation agent for ai_archaeo_topia.",
       "mode": "primary",
-      "model": "llamacpp/Qwen3.6-35B-A3B-UD-Q4_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 30,
@@ -176,7 +170,11 @@
           "git reset*": "deny",
           "git clean*": "deny",
           "git push*": "deny",
+          "rm *": "deny",
+          "rm -r*": "deny",
+          "rm -f*": "deny",
           "rm -rf*": "deny",
+          "rm -fr*": "deny",
           "sudo *": "deny"
         },
         "external_directory": "deny",
@@ -187,7 +185,7 @@
     "plan": {
       "description": "Read-only planning agent. Use before invasive code changes.",
       "mode": "primary",
-      "model": "llamacpp/Qwen3.6-27B-UD-Q5_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 20,
@@ -222,7 +220,7 @@
     "explorer": {
       "description": "Explores the codebase, inspects files, traces dependencies, and explains findings before implementation.",
       "mode": "subagent",
-      "model": "llamacpp/Qwen3.6-27B-UD-Q5_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 20,
@@ -250,7 +248,7 @@
     "implementator": {
       "description": "Implements targeted changes after the relevant files and constraints are known.",
       "mode": "subagent",
-      "model": "llamacpp/Qwen3.6-35B-A3B-UD-Q4_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 25,
@@ -263,6 +261,10 @@
         "edit": "allow",
         "bash": {
           "*": "ask",
+          "pwd": "allow",
+          "ls *": "allow",
+          "find *": "allow",
+          "grep *": "allow",
           "git status*": "allow",
           "git diff*": "allow",
           "python -m compileall *": "allow",
@@ -274,10 +276,18 @@
           "make lint*": "allow",
           "docker compose ps*": "allow",
           "docker compose logs*": "allow",
+          "git add*": "ask",
+          "git commit*": "ask",
+          "git checkout*": "ask",
+          "git switch*": "ask",
           "git reset*": "deny",
           "git clean*": "deny",
           "git push*": "deny",
+          "rm *": "deny",
+          "rm -r*": "deny",
+          "rm -f*": "deny",
           "rm -rf*": "deny",
+          "rm -fr*": "deny",
           "sudo *": "deny"
         },
         "external_directory": "deny",
@@ -288,7 +298,7 @@
     "reviewer": {
       "description": "Reviews code changes for correctness, regression risk, tests, typing, and project conventions.",
       "mode": "subagent",
-      "model": "llamacpp/Qwen3.6-27B-UD-Q5_K_XL",
+      "model": "llamacpp/Qwen3.6-27B-UD-Q4_K_XL",
       "temperature": 0.1,
       "top_p": 0.8,
       "steps": 18,
@@ -322,7 +332,7 @@
     "review": {
       "description": "Review the current working tree changes",
       "agent": "reviewer",
-      "template": "Review the current git diff for correctness, regressions, typing issues, NiceGUI/FastAPI/SQLAlchemy mistakes, and missing tests. Do not edit files."
+      "template": "Review the current git diff for correctness, regressions, typing issues, FastAPI/MCP/CVAT/OCR mistakes, and missing tests. Do not edit files."
     },
     "plan-change": {
       "description": "Plan a code change without editing",

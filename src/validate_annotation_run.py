@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
-"""Validate the annotation run outputs against the protocol."""
+"""Validate the annotation run outputs against the protocol.
+
+Usage:
+  python -m src.validate_annotation_run --csv path/to/annotation_results.csv
+  python src/validate_annotation_run.py --csv path/to/annotation_results.csv
+"""
 
 from __future__ import annotations
 
+import argparse
 import csv
 import logging
+import sys
 from pathlib import Path
 
 from PIL import Image
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
-
-CSV_PATH = Path("/home/naim/repos/ai_archaeo_topia/artifacts/annotation_runs/annotations/master_samples.csv")
-IMAGE_ROOT = Path("/home/naim/repos/ai_archaeo_topia/artifacts/annotation_runs/raw/images")
-REVIEW_ROOT = Path("/home/naim/repos/ai_archaeo_topia/artifacts/annotation_runs/review/samples_for_review")
 
 VALID_LABELS = {"mound", "hard_negative_symbol", "uncertain_ignore"}
 VALID_RELIEF = {"plain", "hilly", "mountain", "slope", "ridge", "valley", "urban", "mixed", "unknown"}
@@ -28,13 +31,36 @@ REQUIRED_COLUMNS = [
     "uncertainty", "annotation_status", "review_status", "notes",
 ]
 
-def validate() -> dict:
+
+def validate(csv_path: str | Path = "annotations/master_samples.csv") -> dict:
+    """Validate annotation CSV against protocol.
+
+    Args:
+        csv_path: Path to the annotation CSV file.
+
+    Returns:
+        Validation summary dict.
+    """
+    csv_p = Path(csv_path)
+    if not csv_p.exists():
+        return {
+            "total_rows": 0,
+            "unique_sample_ids": 0,
+            "errors": 1,
+            "warnings": 0,
+            "error_messages": [f"CSV not found: {csv_p}"],
+            "warning_messages": [],
+        }
+
+    # Infer run directory from CSV location
+    run_dir = csv_p.parent.parent
+
     errors: list[str] = []
     warnings: list[str] = []
     sample_ids: set[str] = set()
     rows = 0
 
-    with open(CSV_PATH, "r", newline="", encoding="utf-8") as f:
+    with open(csv_p, "r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
 
         # Check columns
@@ -53,7 +79,7 @@ def validate() -> dict:
             sample_ids.add(sid)
 
             # Image path exists
-            img_path = row.get("image_path", "")
+            img_path = row.get("image_path", "") or row.get("clip_image_path", "")
             if img_path and not Path(img_path).exists():
                 errors.append(f"Image not found: {img_path}")
 
@@ -78,15 +104,15 @@ def validate() -> dict:
                 warnings.append(f"Unexpected review_status '{review}' for {sid}")
 
     # Check image dimensions consistency
-    for sid in list(sample_ids)[:10]:  # Sample check
+    for sid in list(sample_ids)[:10]:
         csv_row = None
-        with open(CSV_PATH, "r", encoding="utf-8") as f:
+        with open(csv_p, "r", encoding="utf-8") as f:
             for row in csv.DictReader(f):
                 if row["sample_id"] == sid:
                     csv_row = row
                     break
         if csv_row:
-            img_path = csv_row.get("image_path", "")
+            img_path = csv_row.get("image_path", "") or csv_row.get("clip_image_path", "")
             if img_path and Path(img_path).exists():
                 try:
                     img = Image.open(img_path)
@@ -108,7 +134,15 @@ def validate() -> dict:
 
 
 if __name__ == "__main__":
-    result = validate()
+    parser = argparse.ArgumentParser(description="Validate annotation run CSV")
+    parser.add_argument(
+        "--csv",
+        default="annotations/master_samples.csv",
+        help="Path to annotation CSV file",
+    )
+    args = parser.parse_args()
+
+    result = validate(args.csv)
     print("\n=== Validation Summary ===")
     print(f"  Total rows: {result['total_rows']}")
     print(f"  Unique sample IDs: {result['unique_sample_ids']}")
@@ -122,3 +156,5 @@ if __name__ == "__main__":
         print("\n  WARNINGS:")
         for w in result["warning_messages"]:
             print(f"    - {w}")
+
+    sys.exit(1 if result["errors"] else 0)
