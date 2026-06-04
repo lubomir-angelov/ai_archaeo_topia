@@ -208,13 +208,7 @@ __marimo__/
 
 # local
 data/**
-data/cvat_exports/
-data/cvat_tasks/
 draft_kings_coding.py
-
-# CVAT
-.env.cvat
-tools/cvat/
 
 # CCE (code-context-engine)
 # CCE local cache (per-machine, not for version control)

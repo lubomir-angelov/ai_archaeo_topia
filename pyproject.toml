@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cvat-sam2-mcp"
+name = "ai-archaeo-topia"
 version = "0.1.0"
-description = "MCP server for CVAT + SAM2 GPU auto-annotation of archaeological map images"
+description = "SAM2-based auto-annotation of archaeological map images"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
@@ -31,12 +31,11 @@ sam2 = [
 ]
 
 [project.scripts]
-cvat-sam2-mcp = "cvat_sam2_mcp.server:main"
 sam2-mcp = "services.sam2_mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["cvat_sam2_mcp*", "services*", "services.*", "annotation_pipeline*"]
+include = ["services*", "services.*", "annotation_pipeline*"]
 
 [tool.ruff]
 target-version = "py312"

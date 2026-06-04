@@ -1,1 +1,1 @@
-"""Tests for cvat_sam2_mcp package."""
+"""Tests for ai_archaeo_topia."""
