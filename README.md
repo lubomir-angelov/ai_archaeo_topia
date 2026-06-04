@@ -21,40 +21,6 @@ pip install setuptools wheel
 pip install --no-build-isolation --no-cache-dir --force-reinstall gdal==3.4.1
 ```
 
-# CVAT and SAM2 MCP integration
-Next steps to run the integration
-## 1. Pre-flight smoke test (no CVAT needed)
-```bash
-make cvat-mcp-smoke
-```
-# 2. Set credentials in .env or export them
-```bash
-export CVAT_SAM2_CVAT_USERNAME=your_cvat_user
-export CVAT_SAM2_CVAT_PASSWORD=your_cvat_pass
-```
-# 3. Health check (requires CVAT running)
-```bash
-make cvat-mcp-health
-```
-# 4. Dry-run annotation pipeline (preview only)
-```bash
-make annotation-dry-run INPUT_DIR=/path/to/map_images
-```
-# 5. Full annotation run
-```bash
-make annotation-run INPUT_DIR=/path/to/map_images
-```
-# 6. Start MCP server for opencode (stdio mode)
-```bash
-make cvat-mcp-run
-```
-The opencode.json already has the cvat-sam2 MCP config. Set:
-```bash 
-CVAT_SAM2_CVAT_USERNAME
-CVAT_SAM2_CVAT_PASSWORD
-```
-before opencode can authenticate to CVAT.
-
 # SAM2 modes
 ```bash
 Mode A: local/internal mock
