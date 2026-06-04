@@ -12,6 +12,7 @@ SHELL := /usr/bin/env bash
 .PHONY: sam2-mcp-run sam2-mcp-health sam2-mcp-smoke sam2-mcp-contract-test sam2-mcp-mock-smoke sam2-mcp-live-health
 .PHONY: sam2-backend-run sam2-backend-health sam2-backend-mock-smoke sam2-backend-contract-test
 .PHONY: annotation-pdf-sam2-mock-dry-run annotation-pdf-sam2-mock-run annotation-pdf-sam2-validate
+.PHONY: sam2-proposals-run sam2-proposals-mock
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeo_topia
@@ -79,6 +80,14 @@ help:
 	@echo "  make sam2-backend-contract-test   - Run SAM2 backend contract tests"
 	@echo "  make annotation-dry-run - Dry-run the annotation pipeline (INPUT_DIR=...)"
 	@echo "  make annotation-run     - Run the full annotation pipeline (INPUT_DIR=...)"
+	@echo ""
+	@echo "SAM2 proposals (from extracted images + CSV):"
+	@echo "  make sam2-proposals-run   - Run SAM2 proposals against extracted clips"
+	@echo "    INPUT_DIR=...           Path to extraction output (raw/images/, annotations/)"
+	@echo "    OUTPUT_DIR=...          Output directory for masks + annotation CSV"
+	@echo "    BACKEND_URL=...         SAM2 backend URL (default: http://127.0.0.1:8181)"
+	@echo "    MAX_PROPOSALS=...       Max proposals per image (default: 10)"
+	@echo "  make sam2-proposals-mock  - Same but with mock backend"
 	@echo ""
 	@echo "Quality gates:"
 	@echo "  make lint               - Run ruff check + format check"
@@ -565,3 +574,47 @@ annotation-pdf-sam2-validate:
 	@set -euxo pipefail; \
 	echo "Validating: ${CSV_PATH}"; \
 	$(PYTHON) -m src.validate_annotation_run --csv "${CSV_PATH}"
+
+# ---- SAM2 Proposals from extracted images + CSV ----
+
+sam2-proposals-run:
+	@if [ -z "$(INPUT_DIR)" ]; then \
+		echo "Usage: make sam2-proposals-run INPUT_DIR=path/to/extracted [OUTPUT_DIR=...] [BACKEND_URL=...] [MAX_PROPOSALS=10]"; \
+		exit 1; \
+	fi
+	@set -euo pipefail; \
+	output_dir="$(OUTPUT_DIR)"; \
+	if [ -z "$$output_dir" ]; then output_dir="$(INPUT_DIR)/automated_mcp"; fi; \
+	backend_url="$(BACKEND_URL)"; \
+	if [ -z "$$backend_url" ]; then backend_url="http://127.0.0.1:8181"; fi; \
+	max_proposals="$(MAX_PROPOSALS)"; \
+	if [ -z "$$max_proposals" ]; then max_proposals="10"; fi; \
+	echo "Input:    $(INPUT_DIR)"; \
+	echo "Output:   $$output_dir"; \
+	echo "Backend:  $$backend_url"; \
+	echo "Max props: $$max_proposals"; \
+	$(PYTHON) src/sam2_mcp_proposal_run.py \
+		--input-dir "$(INPUT_DIR)" \
+		--output-dir "$$output_dir" \
+		--backend-url "$$backend_url" \
+		--max-proposals "$$max_proposals"
+
+sam2-proposals-mock:
+	@if [ -z "$(INPUT_DIR)" ]; then \
+		echo "Usage: make sam2-proposals-mock INPUT_DIR=path/to/extracted [OUTPUT_DIR=...] [MAX_PROPOSALS=10]"; \
+		exit 1; \
+	fi
+	@set -euo pipefail; \
+	output_dir="$(OUTPUT_DIR)"; \
+	if [ -z "$$output_dir" ]; then output_dir="$(INPUT_DIR)/automated_mcp_mock"; fi; \
+	max_proposals="$(MAX_PROPOSALS)"; \
+	if [ -z "$$max_proposals" ]; then max_proposals="10"; fi; \
+	echo "Input:    $(INPUT_DIR)"; \
+	echo "Output:   $$output_dir"; \
+	echo "Backend:  mock"; \
+	echo "Max props: $$max_proposals"; \
+	$(PYTHON) src/sam2_mcp_proposal_run.py \
+		--input-dir "$(INPUT_DIR)" \
+		--output-dir "$$output_dir" \
+		--backend-url mock \
+		--max-proposals "$$max_proposals"

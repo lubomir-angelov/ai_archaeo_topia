@@ -43,10 +43,10 @@
     "context-engine": {
       "type": "local",
       "command": [
-        "/home/ubuntu/.local/bin/cce",
+        "/home/naim/.local/bin/cce",
         "serve",
         "--project-dir",
-        "/home/ubuntu/repos/ai_archaeo_topia"
+        "/home/naim/repos/ai_archaeo_topia"
       ]
     },
     "ocr": {
