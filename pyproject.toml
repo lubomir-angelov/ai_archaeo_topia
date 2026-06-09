@@ -35,7 +35,7 @@ sam2-mcp = "services.sam2_mcp.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["services*", "services.*", "annotation_pipeline*"]
+include = ["services*", "services.*", "annotation_pipeline*", "archeo_topia*", "archeo_topia.*"]
 
 [tool.ruff]
 target-version = "py312"

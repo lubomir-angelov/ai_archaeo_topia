@@ -6,7 +6,7 @@ SHELL := /usr/bin/env bash
 .PHONY: sam2-mcp-run sam2-mcp-health sam2-mcp-smoke sam2-mcp-contract-test sam2-mcp-mock-smoke sam2-mcp-live-health
 .PHONY: sam2-backend-run sam2-backend-health sam2-backend-mock-smoke sam2-backend-contract-test
 .PHONY: annotation-pdf-sam2-mock-dry-run annotation-pdf-sam2-mock-run annotation-pdf-sam2-validate
-.PHONY: sam2-proposals-run sam2-proposals-mock
+.PHONY: mapsam-prepare mapsam-prepare-v0 mapsam-summary
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeo_topia
@@ -52,6 +52,14 @@ help:
 	@echo "    BACKEND_URL=...         SAM2 backend URL (default: http://127.0.0.1:8181)"
 	@echo "    MAX_PROPOSALS=...       Max proposals per image (default: 10)"
 	@echo "  make sam2-proposals-mock  - Same but with mock backend"
+	@echo ""
+	@echo "MapSAM dataset preparation:"
+	@echo "  make mapsam-prepare              - Convert CVAT COCO → MapSAM dataset"
+	@echo "    COCO_JSON=...                  Path to COCO instances_default.json"
+	@echo "    IMAGES_DIR=...                 Path to CVAT images directory"
+	@echo "    OUTPUT_DIR=...                 Output directory for MapSAM dataset"
+	@echo "  make mapsam-prepare-v0           - Quick run with default v0.0.1 paths"
+	@echo "  make mapsam-summary              - Print dataset_summary.json"
 	@echo ""
 	@echo "Quality gates:"
 	@echo "  make lint               - Run ruff check + format check"
@@ -351,3 +359,41 @@ sam2-proposals-mock:
 		--output-dir "$$output_dir" \
 		--backend-url mock \
 		--max-proposals "$$max_proposals"
+
+# ---- MapSAM dataset preparation ----
+
+mapsam-prepare:
+	@if [ -z "$(COCO_JSON)" ]; then \
+		echo "Usage: make mapsam-prepare COCO_JSON=path/to/instances_default.json IMAGES_DIR=path/to/images [OUTPUT_DIR=...]"; \
+		exit 1; \
+	fi
+	@set -euo pipefail; \
+	output_dir="$(OUTPUT_DIR)"; \
+	if [ -z "$$output_dir" ]; then output_dir="data/curated/datasets/mapsam_v0"; fi; \
+	echo "COCO JSON:  $(COCO_JSON)"; \
+	echo "Images dir: $(IMAGES_DIR)"; \
+	echo "Output dir: $$output_dir"; \
+	$(PYTHON) -m src.archeo_topia.datasets.prepare_mapsam_coco \
+		--coco-json "$(COCO_JSON)" \
+		--images-dir "$(IMAGES_DIR)" \
+		--output-dir "$$output_dir" \
+		--positive-label mound \
+		--ignore-label uncertain_ignore \
+		--hard-negative-label hard_negative_symbol \
+		--split-by sheet
+
+mapsam-prepare-v0:
+	@$(MAKE) mapsam-prepare \
+		COCO_JSON=data/curated/datasets/cvat/v0.0.1/annotations/instances_default.json \
+		IMAGES_DIR=data/curated/datasets/cvat/v0.0.1/images/default \
+		OUTPUT_DIR=data/curated/datasets/mapsam_v0
+
+mapsam-summary:
+	@summary="data/curated/datasets/mapsam_v0/metadata/dataset_summary.json"; \
+	if [ -f "$$summary" ]; then \
+		$(PYTHON) -m json.tool "$$summary"; \
+	else \
+		echo "Summary not found at $$summary"; \
+		echo "Run: make mapsam-prepare-v0"; \
+		exit 1; \
+	fi
