@@ -165,6 +165,29 @@ class TestDecodeRleMask:
         mask = decode_rle_mask(rle, 100, 100)
         assert mask.size == (100, 100)
 
+    def test_rle_integer_counts(self) -> None:
+        """CVAT exports RLE counts as a list of integers."""
+        # 10x10 image: 50 background pixels, then 50 foreground, then rest background
+        # Total = 100 pixels
+        rle = {"size": [10, 10], "counts": [50, 30, 20]}
+        mask = decode_rle_mask(rle, 10, 10)
+        assert mask.size == (10, 10)
+        for i in range(50):
+            assert mask.getpixel((i % 10, i // 10)) == 0, f"Pixel {i} should be 0"
+        for i in range(50, 80):
+            assert mask.getpixel((i % 10, i // 10)) == 255, f"Pixel {i} should be 255"
+        for i in range(80, 100):
+            assert mask.getpixel((i % 10, i // 10)) == 0, f"Pixel {i} should be 0"
+
+    def test_rle_integer_counts_large_runs(self) -> None:
+        """Large run values (like CVAT's 1377995) should work."""
+        # 100x100 = 10000 pixels: 9999 background, 1 foreground
+        rle = {"size": [100, 100], "counts": [9999, 1]}
+        mask = decode_rle_mask(rle, 100, 100)
+        assert mask.size == (100, 100)
+        assert mask.getpixel((99, 99)) == 255
+        assert mask.getpixel((0, 0)) == 0
+
 
 # ---------------------------------------------------------------------------
 # Unit: decode_segmentation
@@ -199,6 +222,20 @@ class TestDecodeSegmentation:
         rle = {"size": [100, 100], "counts": "AAAAAAAA"}
         mask = decode_segmentation(rle, None, 100, 100)
         assert mask.size == (100, 100)
+
+    def test_rle_integer_counts_segmentation(self) -> None:
+        """CVAT RLE with integer counts through decode_segmentation."""
+        rle = {"size": [100, 100], "counts": [9999, 1]}
+        mask = decode_segmentation(rle, None, 100, 100)
+        assert mask.size == (100, 100)
+        assert mask.getpixel((99, 99)) == 255
+        assert mask.getpixel((0, 0)) == 0
+
+    def test_null_segmentation_with_bbox_fallback(self) -> None:
+        """Ignore annotations with null segmentation should fall back to bbox."""
+        mask = decode_segmentation(None, [30, 40, 20, 20], 100, 100)
+        assert mask.getpixel((40, 50)) == 255
+        assert mask.getpixel((0, 0)) == 0
 
 
 # ---------------------------------------------------------------------------

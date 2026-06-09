@@ -167,11 +167,74 @@ def decode_polygon_mask(polygon: list[float], height: int, width: int) -> Image.
     return mask
 
 
+def _decode_rle_integer_counts(
+    counts: list[int], total_pixels: int
+) -> bytearray:
+    """Decode COCO integer-list RLE counts into a flat pixel buffer.
+
+    The counts list is an alternating run-length encoding: first run is 0
+    (background), second run is 1 (foreground), third run is 0, etc.
+
+    Args:
+        counts: List of integer run lengths.
+        total_pixels: Total number of pixels (w * h).
+
+    Returns:
+        Bytearray of length *total_pixels* with 0/255 values.
+    """
+    pixels = bytearray(total_pixels)
+    val = 0
+    pos = 0
+    for run_len in counts:
+        end = min(pos + run_len, total_pixels)
+        for i in range(pos, end):
+            pixels[i] = val * 255
+        pos = end
+        val = 1 - val
+        if pos >= total_pixels:
+            break
+    return pixels
+
+
+def _decode_rle_string_counts(counts_str: str, total_pixels: int) -> bytearray:
+    """Decode COCO string-encoded RLE counts into a flat pixel buffer.
+
+    Each byte is a run length. Value 255 means "add 255 to the current run"
+    and the next byte is the low-order 8 bits of the run length.
+
+    Args:
+        counts_str: ASCII string of RLE count bytes.
+        total_pixels: Total number of pixels (w * h).
+
+    Returns:
+        Bytearray of length *total_pixels* with 0/255 values.
+    """
+    counts_bytes = counts_str.encode("ascii")
+    pixels = bytearray(total_pixels)
+    val = 0
+    pos = 0
+    idx = 0
+    while idx < len(counts_bytes):
+        run = counts_bytes[idx]
+        idx += 1
+        while run == 255 and idx < len(counts_bytes):
+            run += counts_bytes[idx]
+            idx += 1
+        end = min(pos + run, total_pixels)
+        for i in range(pos, end):
+            pixels[i] = val * 255
+        pos = end
+        val = 1 - val
+        if pos >= total_pixels:
+            break
+    return pixels
+
+
 def decode_rle_mask(rle: dict[str, Any], height: int, width: int) -> Image.Image:
     """Decode a COCO RLE segmentation dict into a binary PIL mask.
 
-    Supports both the compact dict format (``{"size": [w, h], "counts": "..."}``)
-    and raw counts.  Falls back to an empty mask on error.
+    Supports CVAT integer-list counts (``{"size": [w, h], "counts": [1377995, 12, ...]}``)
+    and standard COCO string-encoded counts.  Falls back to an empty mask on error.
 
     Args:
         rle: RLE dictionary with ``size`` and ``counts`` keys.
@@ -185,26 +248,16 @@ def decode_rle_mask(rle: dict[str, Any], height: int, width: int) -> Image.Image
     try:
         size = rle.get("size", [width, height])
         w, h = size[0], size[1]
+        total_pixels = w * h
         counts = rle.get("counts", "")
 
-        counts_bytes = counts.encode("ascii") if isinstance(counts, str) else counts
-
-        pixels = bytearray(w * h)
-        val = 0
-        pos = 0
-        for byte in counts_bytes:
-            run = byte
-            while run == 255:
-                pos += 255
-                if pos >= len(counts_bytes):
-                    break
-                run = counts_bytes[pos]
-                pos += 1
-            val = 1 - val
-            end = min(pos + run, w * h)
-            for i in range(pos, end):
-                pixels[i] = val * 255
-            pos = end
+        if isinstance(counts, list):
+            pixels = _decode_rle_integer_counts(counts, total_pixels)
+        elif isinstance(counts, str):
+            pixels = _decode_rle_string_counts(counts, total_pixels)
+        else:
+            logger.warning("Unknown RLE counts type: %s", type(counts).__name__)
+            return mask
 
         img = Image.frombytes("L", (w, h), bytes(pixels))
         if w != width or h != height:
