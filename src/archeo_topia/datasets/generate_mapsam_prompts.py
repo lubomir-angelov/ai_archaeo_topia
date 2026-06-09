@@ -240,7 +240,8 @@ def build_training_sample(
         Dictionary representing one JSONL row.
     """
     component_idx = component["index"]
-    sample_id = f"{split}_{sheet_id}_{component_idx:06d}"
+    file_stem = Path(filename).stem
+    sample_id = f"{split}_{file_stem}_{component_idx:06d}"
 
     return {
         "sample_id": sample_id,

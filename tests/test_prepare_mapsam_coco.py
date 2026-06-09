@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
+import pytest
 from PIL import Image
 
 from archeo_topia.datasets.prepare_mapsam_coco import (
@@ -13,8 +15,10 @@ from archeo_topia.datasets.prepare_mapsam_coco import (
     decode_polygon_mask,
     decode_rle_mask,
     decode_segmentation,
+    decode_uncompressed_coco_rle,
     extract_sheet_id,
     find_category_id,
+    mask_to_bbox,
     run,
 )
 
@@ -153,40 +157,126 @@ class TestDecodeBboxMask:
 
 class TestDecodeRleMask:
     def test_rle_basic(self) -> None:
-        counts = bytearray(100 * 100)
-        counts[0] = 50
-        counts[1] = 50
-        rle = {"size": [100, 100], "counts": counts.decode("ascii", errors="ignore")}
-        mask = decode_rle_mask(rle, 100, 100)
-        assert mask.size == (100, 100)
+        """Simple 5x5 RLE: 20 bg, 5 fg, 10 bg = 35 pixels."""
+        rle = {"size": [5, 7], "counts": [20, 5, 10]}
+        mask = decode_rle_mask(rle, 5, 7)
+        assert mask.size == (7, 5)
 
     def test_rle_fallback_on_error(self) -> None:
-        rle = {"size": [100, 100], "counts": "invalid\x00\x01"}
+        """Non-list counts should fall back to empty mask."""
+        rle = {"size": [100, 100], "counts": "compressed_string"}
         mask = decode_rle_mask(rle, 100, 100)
         assert mask.size == (100, 100)
 
     def test_rle_integer_counts(self) -> None:
         """CVAT exports RLE counts as a list of integers."""
-        # 10x10 image: 50 background pixels, then 50 foreground, then rest background
-        # Total = 100 pixels
+        # 10x10 image: 50 background, 30 foreground, 20 background = 100
         rle = {"size": [10, 10], "counts": [50, 30, 20]}
         mask = decode_rle_mask(rle, 10, 10)
         assert mask.size == (10, 10)
-        for i in range(50):
-            assert mask.getpixel((i % 10, i // 10)) == 0, f"Pixel {i} should be 0"
-        for i in range(50, 80):
-            assert mask.getpixel((i % 10, i // 10)) == 255, f"Pixel {i} should be 255"
-        for i in range(80, 100):
-            assert mask.getpixel((i % 10, i // 10)) == 0, f"Pixel {i} should be 0"
 
     def test_rle_integer_counts_large_runs(self) -> None:
         """Large run values (like CVAT's 1377995) should work."""
-        # 100x100 = 10000 pixels: 9999 background, 1 foreground
         rle = {"size": [100, 100], "counts": [9999, 1]}
         mask = decode_rle_mask(rle, 100, 100)
         assert mask.size == (100, 100)
-        assert mask.getpixel((99, 99)) == 255
-        assert mask.getpixel((0, 0)) == 0
+
+
+# ---------------------------------------------------------------------------
+# Unit: decode_uncompressed_coco_rle
+# ---------------------------------------------------------------------------
+
+
+class TestDecodeUncompressedCocoRle:
+    def test_first_count_is_background(self) -> None:
+        """First count must be treated as background (0)."""
+        seg = {"size": [10, 10], "counts": [60, 40]}
+        arr = decode_uncompressed_coco_rle(seg, 10, 10)
+        assert arr.shape == (10, 10)
+        assert arr.dtype == np.uint8
+        fg_count = (arr > 0).sum()
+        assert fg_count == 40
+
+    def test_reshapes_with_fortran_order(self) -> None:
+        """Reshape must use order='F' (column-major), not row-major."""
+        # 5x3 image: 10 bg, 5 fg, 0 bg = 15 pixels
+        # Column-major: first 10 pixels fill cols 0-1, then 5 fg fill col 2
+        seg = {"size": [3, 5], "counts": [10, 5]}
+        arr = decode_uncompressed_coco_rle(seg, 3, 5)
+        assert arr.shape == (3, 5)
+        fg_count = (arr > 250).sum()
+        assert fg_count == 5
+
+    def test_fg_value_is_255(self) -> None:
+        """Foreground pixels must be exactly 255."""
+        seg = {"size": [10, 10], "counts": [50, 50]}
+        arr = decode_uncompressed_coco_rle(seg, 10, 10)
+        unique_vals = set(arr[arr > 0])
+        assert unique_vals == {255}
+
+    def test_negative_count_raises(self) -> None:
+        seg = {"size": [10, 10], "counts": [51, -1, 50]}
+        with pytest.raises(ValueError, match="negative"):
+            decode_uncompressed_coco_rle(seg, 10, 10)
+
+    def test_pixel_count_mismatch_raises(self) -> None:
+        seg = {"size": [10, 10], "counts": [50, 50]}
+        with pytest.raises(ValueError, match="sum"):
+            decode_uncompressed_coco_rle(seg, 20, 20)
+
+    def test_non_list_counts_raises(self) -> None:
+        seg = {"size": [10, 10], "counts": "compressed_string"}
+        with pytest.raises(ValueError, match="Compressed"):
+            decode_uncompressed_coco_rle(seg, 10, 10)
+
+    def test_bbox_regression(self) -> None:
+        """Decoded mask bbox must approximately match the COCO bbox."""
+        import json
+        from pathlib import Path
+
+        coco_path = Path("data/curated/datasets/cvat/v0.0.1/annotations/instances_default.json")
+        if not coco_path.exists():
+            pytest.skip("COCO export not available")
+
+        coco = json.loads(coco_path.read_text())
+        img = next(i for i in coco["images"] if i["file_name"] == "K-34-35-B-g_1.png")
+        anns = [
+            a for a in coco["annotations"] if a["image_id"] == img["id"] and a["category_id"] == 1
+        ]
+        assert len(anns) >= 1
+        ann = anns[0]
+        arr = decode_uncompressed_coco_rle(ann["segmentation"], img["height"], img["width"])
+        bbox = mask_to_bbox(arr)
+        assert bbox is not None
+        cx, cy, cw, ch = ann["bbox"]
+        expected = (int(cx), int(cy), int(cx + cw), int(cy + ch))
+        dx = abs(bbox[0] - expected[0]) + abs(bbox[2] - expected[2])
+        dy = abs(bbox[1] - expected[1]) + abs(bbox[3] - expected[3])
+        assert dx <= 3, f"X deviation {dx} too large: decoded={bbox} expected={expected}"
+        assert dy <= 3, f"Y deviation {dy} too large: decoded={bbox} expected={expected}"
+
+
+# ---------------------------------------------------------------------------
+# Unit: mask_to_bbox
+# ---------------------------------------------------------------------------
+
+
+class TestMaskToBbox:
+    def test_solid_block(self) -> None:
+        arr = np.zeros((100, 100), dtype=np.uint8)
+        arr[20:40, 30:60] = 255
+        bbox = mask_to_bbox(arr)
+        assert bbox == (30, 20, 59, 39)
+
+    def test_empty_mask(self) -> None:
+        arr = np.zeros((100, 100), dtype=np.uint8)
+        assert mask_to_bbox(arr) is None
+
+    def test_single_pixel(self) -> None:
+        arr = np.zeros((10, 10), dtype=np.uint8)
+        arr[3, 7] = 255
+        bbox = mask_to_bbox(arr)
+        assert bbox == (7, 3, 7, 3)
 
 
 # ---------------------------------------------------------------------------

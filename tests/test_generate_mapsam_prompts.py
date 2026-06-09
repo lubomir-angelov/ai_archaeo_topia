@@ -234,7 +234,7 @@ class TestBuildTrainingSample:
             dataset_root=Path("/data"),
         )
 
-        assert sample["sample_id"] == "train_K-35-8-G-a_000001"
+        assert sample["sample_id"] == "train_K-35-8-G-a_1_000001"
         assert sample["split"] == "train"
         assert sample["sheet_id"] == "K-35-8-G-a"
         assert sample["image_path"] == "images/train/K-35-8-G-a_1.png"
