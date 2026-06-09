@@ -126,3 +126,78 @@ Examples:
 ### Annotation rule for `uncertain_ignore`
 
 These annotations are for review and exclusion from training. They should not be used as normal training targets. During dataset preparation, `uncertain_ignore` objects should be filtered out or used as ignored regions, depending on the training pipeline.
+
+
+## Export CVAT Project as COCO
+
+After finishing the annotation tasks, export the full CVAT project as a COCO dataset.
+
+### Recommended export scope
+
+Export from the **project**, not from individual tasks.
+
+This keeps all task annotations together and preserves a consistent label mapping.
+
+### UI export steps
+
+1. Open CVAT.
+
+2. Go to **Projects**.
+
+3. Open the project:
+
+   ```text
+   ai_archeo_topia
+   ```
+
+4. Open the project actions menu.
+
+5. Click **Export dataset**.
+
+6. Select format:
+
+   ```text
+   COCO 1.0
+   ```
+
+7. Enable:
+
+   ```text
+   Save images
+   ```
+
+8. Start the export.
+
+9. Download the generated `.zip` file.
+
+10. Store it under the dataset artifacts folder, for example:
+
+```text
+artifacts/datasets/cvat_exports/archeo_mound_detection_v0_1_coco.zip
+```
+
+### Optional CLI export
+
+Find the project ID:
+
+```bash
+cvat-cli project ls
+```
+
+Export the project as COCO with images:
+
+```bash
+PROJECT_ID="<your_project_id>"
+
+cvat-cli project export-dataset \
+  --format "COCO 1.0" \
+  --with-images yes \
+  "${PROJECT_ID}" \
+  "archeo_mound_detection_v0_1_coco.zip"
+```
+
+### Notes
+
+Use the COCO export as the canonical dataset export for MapSAM-style training.
+
+The `uncertain_ignore` label should be filtered out during dataset preparation unless the training pipeline explicitly supports ignore regions.
