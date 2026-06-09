@@ -223,3 +223,7 @@ data/
 artifacts/
 _dry_run/
 models/
+models/checkpoints/
+*.pth
+*.pt
+*.ckpt

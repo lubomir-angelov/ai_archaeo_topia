@@ -108,3 +108,46 @@ INFO Summary: {
 Defaults: `--positive-label mound`, `--ignore-label uncertain_ignore`,
 `--hard-negative-label hard_negative_symbol`, `--split-by sheet`, 70/15/15
 train/val/test split.
+
+## MapSAM training setup (SAM v1)
+
+ViT-B is the default starting point for debugging. Download ViT-L or ViT-H
+later for larger experiments.
+
+### 1. Install SAM v1 dependency
+
+```bash
+python -m pip install "git+https://github.com/facebookresearch/segment-anything.git"
+```
+
+Or use the project optional group:
+
+```bash
+pip install -e ".[sam]"
+```
+
+### 2. Download ViT-B checkpoint
+
+```bash
+scripts/download_sam_checkpoints.sh --vit-b
+```
+
+Download additional variants when needed:
+
+```bash
+scripts/download_sam_checkpoints.sh --vit-b --vit-l
+scripts/download_sam_checkpoints.sh --all
+```
+
+### 3. Verify installation
+
+```bash
+python -m archeo_topia.training.check_sam_setup \
+  --model-type vit_b \
+  --checkpoint models/checkpoints/sam/sam_vit_b_01ec64.pth
+```
+
+### 4. Training config
+
+A starter config lives at `configs/mapsam/mapsam_v0_1_decoder_only.yaml`.
+It freezes the image encoder and trains only the mask decoder.
