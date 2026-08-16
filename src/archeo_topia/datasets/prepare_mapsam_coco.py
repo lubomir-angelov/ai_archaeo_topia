@@ -27,6 +27,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
@@ -167,74 +168,64 @@ def decode_polygon_mask(polygon: list[float], height: int, width: int) -> Image.
     return mask
 
 
-def _decode_rle_integer_counts(
-    counts: list[int], total_pixels: int
-) -> bytearray:
-    """Decode COCO integer-list RLE counts into a flat pixel buffer.
+def decode_uncompressed_coco_rle(
+    segmentation: dict[str, Any],
+    image_height: int,
+    image_width: int,
+) -> np.ndarray:
+    """Decode uncompressed COCO RLE into a binary mask.
 
-    The counts list is an alternating run-length encoding: first run is 0
-    (background), second run is 1 (foreground), third run is 0, etc.
-
-    Args:
-        counts: List of integer run lengths.
-        total_pixels: Total number of pixels (w * h).
-
-    Returns:
-        Bytearray of length *total_pixels* with 0/255 values.
-    """
-    pixels = bytearray(total_pixels)
-    val = 0
-    pos = 0
-    for run_len in counts:
-        end = min(pos + run_len, total_pixels)
-        for i in range(pos, end):
-            pixels[i] = val * 255
-        pos = end
-        val = 1 - val
-        if pos >= total_pixels:
-            break
-    return pixels
-
-
-def _decode_rle_string_counts(counts_str: str, total_pixels: int) -> bytearray:
-    """Decode COCO string-encoded RLE counts into a flat pixel buffer.
-
-    Each byte is a run length. Value 255 means "add 255 to the current run"
-    and the next byte is the low-order 8 bits of the run length.
+    COCO RLE is column-major / Fortran-order. The first count is background.
 
     Args:
-        counts_str: ASCII string of RLE count bytes.
-        total_pixels: Total number of pixels (w * h).
+        segmentation: RLE dict with ``size`` and ``counts`` keys.
+        image_height: Image height from COCO image record.
+        image_width: Image width from COCO image record.
 
     Returns:
-        Bytearray of length *total_pixels* with 0/255 values.
+        Binary uint8 array of shape ``(image_height, image_width)``
+        with foreground = 255, background = 0.
+
+    Raises:
+        ValueError: If counts is not a list, sum of counts does not match
+            image dimensions, or a negative count is found.
     """
-    counts_bytes = counts_str.encode("ascii")
-    pixels = bytearray(total_pixels)
-    val = 0
-    pos = 0
-    idx = 0
-    while idx < len(counts_bytes):
-        run = counts_bytes[idx]
-        idx += 1
-        while run == 255 and idx < len(counts_bytes):
-            run += counts_bytes[idx]
-            idx += 1
-        end = min(pos + run, total_pixels)
-        for i in range(pos, end):
-            pixels[i] = val * 255
-        pos = end
-        val = 1 - val
-        if pos >= total_pixels:
-            break
-    return pixels
+    counts = segmentation["counts"]
+
+    if not isinstance(counts, list):
+        raise ValueError(
+            "Compressed COCO RLE is not supported by this decoder. "
+            "Expected segmentation['counts'] to be a list of integers."
+        )
+
+    expected_pixels = image_height * image_width
+    total_pixels = sum(counts)
+    if total_pixels != expected_pixels:
+        raise ValueError(
+            f"Invalid RLE counts: sum(counts)={total_pixels} != height*width={expected_pixels}"
+        )
+
+    flat = np.zeros(expected_pixels, dtype=np.uint8)
+    index = 0
+    value = 0
+
+    for count in counts:
+        if count < 0:
+            raise ValueError(f"Invalid negative RLE count: {count}")
+        if value == 1:
+            flat[index : index + count] = 255
+        index += count
+        value = 1 - value
+
+    return flat.reshape((image_height, image_width), order="F")
 
 
 def decode_rle_mask(rle: dict[str, Any], height: int, width: int) -> Image.Image:
     """Decode a COCO RLE segmentation dict into a binary PIL mask.
 
-    Supports CVAT integer-list counts (``{"size": [w, h], "counts": [1377995, 12, ...]}``)
-    and standard COCO string-encoded counts.  Falls back to an empty mask on error.
+    Supports CVAT integer-list counts.  The RLE ``size`` field is
+    intentionally ignored — the image dimensions from the COCO image
+    record are the source of truth.
 
     Args:
         rle: RLE dictionary with ``size`` and ``counts`` keys.
@@ -244,28 +235,12 @@ def decode_rle_mask(rle: dict[str, Any], height: int, width: int) -> Image.Image
     Returns:
         Binary ``L`` mode Image (0/255).
     """
-    mask = Image.new("L", (width, height), 0)
     try:
-        size = rle.get("size", [width, height])
-        w, h = size[0], size[1]
-        total_pixels = w * h
-        counts = rle.get("counts", "")
-
-        if isinstance(counts, list):
-            pixels = _decode_rle_integer_counts(counts, total_pixels)
-        elif isinstance(counts, str):
-            pixels = _decode_rle_string_counts(counts, total_pixels)
-        else:
-            logger.warning("Unknown RLE counts type: %s", type(counts).__name__)
-            return mask
-
-        img = Image.frombytes("L", (w, h), bytes(pixels))
-        if w != width or h != height:
-            img = img.resize((width, height), Image.NEAREST)
-        return img
+        arr = decode_uncompressed_coco_rle(rle, height, width)
+        return Image.fromarray(arr, "L")
     except Exception as exc:  # noqa: BLE001
         logger.warning("RLE decode failed: %s", exc)
-        return mask
+        return Image.new("L", (width, height), 0)
 
 
 def decode_bbox_mask(bbox: list[float], height: int, width: int) -> Image.Image:
@@ -284,6 +259,69 @@ def decode_bbox_mask(bbox: list[float], height: int, width: int) -> Image.Image:
     x, y, bw, bh = bbox
     draw.rectangle([x, y, x + bw, y + bh], fill=255)
     return mask
+
+
+# ---------------------------------------------------------------------------
+# Validation helpers
+# ---------------------------------------------------------------------------
+
+
+def mask_to_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
+    """Return mask bbox as ``(x_min, y_min, x_max, y_max)`` or ``None``.
+
+    Args:
+        mask: 2D binary array (foreground > 0).
+
+    Returns:
+        Bounding box in xyxy coordinates, or ``None`` if the mask is empty.
+    """
+    ys, xs = np.where(mask > 0)
+    if len(xs) == 0:
+        return None
+    return int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max())
+
+
+def _validate_rle_bbox(
+    mask: np.ndarray,
+    coco_bbox: list[float],
+    ann_id: int,
+    image_name: str,
+    tolerance: int = 3,
+    strict: bool = False,
+) -> None:
+    """Validate that decoded RLE mask bbox matches the COCO annotation bbox.
+
+    Args:
+        mask: Decoded 2D binary mask array.
+        coco_bbox: COCO annotation bbox as ``[x, y, w, h]``.
+        ann_id: Annotation ID for logging.
+        image_name: Image filename for logging.
+        tolerance: Allowed pixel deviation on each axis.
+        strict: If ``True``, raise on mismatch instead of warning.
+    """
+    decoded = mask_to_bbox(mask)
+    if decoded is None:
+        msg = f"ann_id={ann_id} image={image_name}: decoded mask is empty (COCO bbox={coco_bbox})"
+        if strict:
+            raise ValueError(msg)
+        logger.warning(msg)
+        return
+
+    cx, cy, cw, ch = coco_bbox
+    expected = (int(cx), int(cy), int(cx + cw), int(cy + ch))
+
+    dx = abs(decoded[0] - expected[0]) + abs(decoded[2] - expected[2])
+    dy = abs(decoded[1] - expected[1]) + abs(decoded[3] - expected[3])
+
+    if dx > tolerance or dy > tolerance:
+        msg = (
+            f"ann_id={ann_id} image={image_name}: "
+            f"RLE mask bbox {decoded} deviates from COCO bbox {expected} "
+            f"(dx={dx}, dy={dy}, tolerance={tolerance})"
+        )
+        if strict:
+            raise ValueError(msg)
+        logger.warning(msg)
 
 
 def decode_segmentation(
@@ -346,8 +384,6 @@ def _max_image(a: Image.Image, b: Image.Image) -> Image.Image:
     Returns:
         Combined mask.
     """
-    import numpy as np  # noqa: PLC0415
-
     arr_a = np.array(a)
     arr_b = np.array(b)
     combined = np.maximum(arr_a, arr_b)
@@ -384,6 +420,7 @@ def process_image(
     ignore_id: int | None,
     hard_negative_id: int | None,
     images_dir: Path,
+    strict_rle_validation: bool = False,
 ) -> tuple[Image.Image, Image.Image, Image.Image, dict[str, int]]:
     """Generate masks for a single image.
 
@@ -394,6 +431,7 @@ def process_image(
         ignore_id: Category ID for ignore class.
         hard_negative_id: Category ID for hard-negative class.
         images_dir: Root directory containing source images.
+        strict_rle_validation: If ``True``, raise on RLE mask / bbox mismatch.
 
     Returns:
         Tuple of (source_image, positive_mask, ignore_mask, counts_dict).
@@ -428,11 +466,27 @@ def process_image(
         if cat_id == positive_id:
             counts["mound"] += 1
             sub = decode_segmentation(seg, bbox, height, width)
+            if isinstance(seg, dict) and bbox:
+                _validate_rle_bbox(
+                    np.array(sub),
+                    bbox,
+                    ann.get("id", -1),
+                    fname,
+                    strict=strict_rle_validation,
+                )
             positive_mask = _max_image(positive_mask, sub)
 
         elif cat_id == ignore_id:
             counts["uncertain_ignore"] += 1
             sub = decode_segmentation(seg, bbox, height, width)
+            if isinstance(seg, dict) and bbox:
+                _validate_rle_bbox(
+                    np.array(sub),
+                    bbox,
+                    ann.get("id", -1),
+                    fname,
+                    strict=strict_rle_validation,
+                )
             ignore_mask = _max_image(ignore_mask, sub)
 
         elif cat_id == hard_negative_id:
@@ -529,6 +583,7 @@ def run(
     ignore_label: str = "uncertain_ignore",
     hard_negative_label: str = "hard_negative_symbol",
     split_by: str = "sheet",
+    strict_rle_validation: bool = False,
 ) -> None:
     """Execute the full CVAT → MapSAM conversion pipeline.
 
@@ -540,6 +595,7 @@ def run(
         ignore_label: Category name for ignore masks.
         hard_negative_label: Category name for hard-negative tracking.
         split_by: Split strategy (currently only ``"sheet"`` is supported).
+        strict_rle_validation: If ``True``, raise on RLE mask / bbox mismatch.
     """
     if split_by != "sheet":
         logger.warning("Only --split-by sheet is supported; ignoring %s", split_by)
@@ -599,7 +655,13 @@ def run(
             continue
 
         source, pos_mask, ign_mask, counts = process_image(
-            img_record, annotations, positive_id, ignore_id, hard_negative_id, images_dir
+            img_record,
+            annotations,
+            positive_id,
+            ignore_id,
+            hard_negative_id,
+            images_dir,
+            strict_rle_validation=strict_rle_validation,
         )
 
         shutil.copy2(images_dir / fname, output_dir / "images" / split / fname)
@@ -689,6 +751,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["sheet"],
         help="Split strategy (default: sheet)",
     )
+    parser.add_argument(
+        "--strict-rle-validation",
+        action="store_true",
+        help="Raise on RLE mask / bbox mismatch instead of warning",
+    )
     return parser.parse_args(argv)
 
 
@@ -709,6 +776,7 @@ def main(argv: list[str] | None = None) -> None:
         ignore_label=args.ignore_label,
         hard_negative_label=args.hard_negative_label,
         split_by=args.split_by,
+        strict_rle_validation=args.strict_rle_validation,
     )
 
 

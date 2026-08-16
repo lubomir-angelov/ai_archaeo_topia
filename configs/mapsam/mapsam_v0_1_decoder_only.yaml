@@ -1,0 +1,41 @@
+experiment_name: mapsam_v0_1_decoder_only
+
+dataset:
+  root: data/curated/datasets/mapsam_v0
+  samples: metadata/training_samples.jsonl
+  image_size: 1024
+  num_workers: 2
+  val_split: test
+
+model:
+  model_type: vit_b
+  sam_checkpoint: models/checkpoints/sam/sam_vit_b_01ec64.pth
+  freeze_image_encoder: true
+  train_prompt_encoder: false
+  train_mask_decoder: true
+
+training:
+  epochs: 50
+  batch_size: 1
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  device: cuda
+  seed: 42
+  save_every_epochs: 5
+  validate_every_epochs: 1
+  max_train_batches: null
+  max_val_batches: null
+  use_cached_embeddings: true
+
+loss:
+  bce_weight: 0.5
+  dice_weight: 2.0
+  eps: 0.000001
+  foreground_bce_pos_weight: 20.0
+  use_bbox_loss_crop: true
+  bbox_loss_crop_margin: 32
+
+outputs:
+  root: artifacts/models/mapsam/v0_1_decoder_only
+  save_debug_predictions: true
+  debug_prediction_count: 8
