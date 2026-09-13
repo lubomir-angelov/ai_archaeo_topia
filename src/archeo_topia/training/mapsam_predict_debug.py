@@ -26,7 +26,10 @@ import torch
 from PIL import Image, ImageDraw
 from torch.utils.data import DataLoader
 
-from archeo_topia.datasets.mapsam_dataset import MapSamDataset
+from archeo_topia.datasets.mapsam_dataset import (
+    MapSamDataset,
+    count_connected_components,
+)
 from archeo_topia.training.train_mapsam_v0 import (
     forward_sam,
     load_checkpoint,
@@ -61,14 +64,16 @@ def draw_overlay(
     ignore_mask_np: np.ndarray,
     box_prompt: list[float],
     point_prompt: list[float],
+    sample_id: str = "",
 ) -> Image.Image:
     """Create a composite overlay image for debugging.
 
-    Layout (4 panels, left to right):
+    Layout (5 panels, left to right):
         1. Original image + bbox + point
-        2. Ground truth mask
-        3. Predicted mask
+        2. Ground truth instance mask
+        3. Predicted mask (threshold=0.5)
         4. Ignore mask
+        5. GT vs Prediction comparison
 
     Args:
         image_np: RGB image array ``(H, W, 3)`` in [0, 255].
@@ -77,11 +82,40 @@ def draw_overlay(
         ignore_mask_np: Binary ignore mask ``(H, W)`` in [0, 1].
         box_prompt: Bounding box ``[x1, y1, x2, y2]``.
         point_prompt: Point ``[x, y]``.
+        sample_id: Sample identifier for titles.
 
     Returns:
         PIL Image with the composite overlay.
     """
     h, w = image_np.shape[:2]
+
+    # Compute metrics
+    gt_bool = target_mask_np > 0.5
+    pred_bool = pred_mask_np > 0.5
+    intersection = (gt_bool & pred_bool).sum()
+    union = (gt_bool | pred_bool).sum()
+    iou = float(intersection) / float(union) if union > 0 else 0.0
+    dice = (
+        (2.0 * intersection) / (gt_bool.sum() + pred_bool.sum())
+        if (gt_bool.sum() + pred_bool.sum()) > 0
+        else 0.0
+    )
+    target_pos = int(gt_bool.sum())
+    pred_pos = int(pred_bool.sum())
+    target_ncc = count_connected_components(target_mask_np)
+
+    # Warn if target has multiple components
+    if target_ncc > 1:
+        logger.warning(
+            "Target mask has %d components for sample_id=%s (expected 1)",
+            target_ncc,
+            sample_id,
+        )
+
+    # Title text
+    title = (
+        f"{sample_id} | GT={target_pos}px | Pred={pred_pos}px | IoU={iou:.3f} | Dice={dice:.3f}"
+    )
 
     panels: list[Image.Image] = []
 
@@ -96,29 +130,52 @@ def draw_overlay(
     cx, cy = int(point_prompt[0]), int(point_prompt[1])
     r = 5
     draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill="green")
+    _add_title(p1, "Image + Prompts")
     panels.append(p1)
 
-    # Panel 2: GT mask
+    # Panel 2: GT instance mask
     gt_arr = np.clip(target_mask_np * 255, 0, 255).astype(np.uint8)
     p2 = Image.fromarray(gt_arr, mode="L").convert("RGB")
+    _add_title(p2, f"GT instance mask (n={target_ncc})")
     panels.append(p2)
 
     # Panel 3: Pred mask
     pred_arr = np.clip(pred_mask_np * 255, 0, 255).astype(np.uint8)
     p3 = Image.fromarray(pred_arr, mode="L").convert("RGB")
+    _add_title(p3, "Pred mask (threshold=0.5)")
     panels.append(p3)
 
     # Panel 4: Ignore mask
     ign_arr = np.clip(ignore_mask_np * 255, 0, 255).astype(np.uint8)
     p4 = Image.fromarray(ign_arr, mode="L").convert("RGB")
+    _add_title(p4, "Ignore mask")
     panels.append(p4)
 
-    total_w = w * 4
-    composite = Image.new("RGB", (total_w, h))
+    # Panel 5: GT vs Pred comparison
+    # Green = GT only, Red = Pred only, Yellow = overlap, Black = neither
+    comp_arr = np.zeros((h, w, 3), dtype=np.uint8)
+    comp_arr[gt_bool & ~pred_bool] = [0, 255, 0]
+    comp_arr[~gt_bool & pred_bool] = [255, 0, 0]
+    comp_arr[gt_bool & pred_bool] = [255, 255, 0]
+    p5 = Image.fromarray(comp_arr)
+    _add_title(p5, "GT vs Pred (G=GT R=Pred Y=overlap)")
+    panels.append(p5)
+
+    total_w = w * 5
+    title_h = 24
+    composite = Image.new("RGB", (total_w, h + title_h), color=(30, 30, 30))
+    draw_comp = ImageDraw.Draw(composite)
+    draw_comp.text((4, 2), title, fill=(255, 255, 255))
     for i, panel in enumerate(panels):
-        composite.paste(panel, (i * w, 0))
+        composite.paste(panel, (i * w, title_h))
 
     return composite
+
+
+def _add_title(img: Image.Image, text: str) -> None:
+    """Draw text at the top-left corner of an image."""
+    draw = ImageDraw.Draw(img)
+    draw.text((4, 2), text, fill=(255, 255, 255))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -213,12 +270,14 @@ def main(argv: list[str] | None = None) -> None:
         box = batch["box_prompt"].squeeze().cpu().tolist()
         point = batch["point_prompt"].squeeze().cpu().tolist()
 
-        overlay = draw_overlay(image_np, target_np, pred_np, ignore_np, box, point)
-
         sample_id = (
             batch["sample_id"][0]
             if isinstance(batch["sample_id"], (list, torch.Tensor))
             else batch["sample_id"]
+        )
+
+        overlay = draw_overlay(
+            image_np, target_np, pred_np, ignore_np, box, point, sample_id=sample_id
         )
         out_path = output_dir / f"{sample_id}_overlay.png"
         overlay.save(str(out_path))

@@ -22,6 +22,7 @@ from archeo_topia.datasets.mapsam_dataset import (
     resize_image_and_masks,
     scale_bbox,
     scale_point,
+    select_instance_mask,
     validate_sample_row,
 )
 
@@ -58,9 +59,7 @@ class MapSamEmbeddingDataset(Dataset):
         self.return_original_size = return_original_size
 
         if split not in _VALID_SPLITS:
-            raise ValueError(
-                f"Invalid split '{split}'. Must be one of {sorted(_VALID_SPLITS)}"
-            )
+            raise ValueError(f"Invalid split '{split}'. Must be one of {sorted(_VALID_SPLITS)}")
 
         all_rows = load_jsonl(self.samples_path)
         self._samples: list[dict[str, Any]] = [
@@ -71,8 +70,7 @@ class MapSamEmbeddingDataset(Dataset):
             raise ValueError(f"No samples found for split '{split}'")
 
         logger.info(
-            "MapSamEmbeddingDataset: loaded %d samples for split '%s' "
-            "(embeddings from %s/%s/%s)",
+            "MapSamEmbeddingDataset: loaded %d samples for split '%s' (embeddings from %s/%s/%s)",
             len(self._samples),
             split,
             model_type,
@@ -90,17 +88,11 @@ class MapSamEmbeddingDataset(Dataset):
         image_rel = row["image_path"]
         stem = Path(image_rel).stem
         cache_file = (
-            self.dataset_root
-            / "sam_embeddings"
-            / self.model_type
-            / self.split
-            / f"{stem}.pt"
+            self.dataset_root / "sam_embeddings" / self.model_type / self.split / f"{stem}.pt"
         )
 
         if not cache_file.exists():
-            raise FileNotFoundError(
-                f"Cached embedding not found for {image_rel}: {cache_file}"
-            )
+            raise FileNotFoundError(f"Cached embedding not found for {image_rel}: {cache_file}")
 
         payload = torch.load(str(cache_file), map_location="cpu", weights_only=False)
         image_embedding = payload["image_embedding"]
@@ -108,9 +100,7 @@ class MapSamEmbeddingDataset(Dataset):
         orig_h, orig_w = original_size
 
         mask_path = self.dataset_root / row["mask_path"]
-        ignore_mask_path = self.dataset_root / row.get(
-            "ignore_mask_path", row["mask_path"]
-        )
+        ignore_mask_path = self.dataset_root / row.get("ignore_mask_path", row["mask_path"])
 
         target_mask = load_binary_mask(mask_path)
         ignore_mask = load_binary_mask(ignore_mask_path)
@@ -126,9 +116,27 @@ class MapSamEmbeddingDataset(Dataset):
         point_prompt = scale_point(row["center_point"], orig_h, orig_w, self.image_size)
         point_label = torch.tensor([1], dtype=torch.int64)
 
+        # Select the instance-specific target mask from the resized semantic mask
+        semantic_mask_np = target_r.squeeze(0).cpu().numpy()
+        instance_mask_np = select_instance_mask(
+            semantic_mask=semantic_mask_np,
+            center_point_xy=(
+                float(point_prompt[0]),
+                float(point_prompt[1]),
+            ),
+            bbox_xyxy=(
+                float(box_prompt[0]),
+                float(box_prompt[1]),
+                float(box_prompt[2]),
+                float(box_prompt[3]),
+            ),
+            sample_id=row["sample_id"],
+        )
+        instance_mask_tensor = torch.tensor(instance_mask_np, dtype=torch.float32).unsqueeze(0)
+
         result: dict[str, Any] = {
             "image_embedding": image_embedding,
-            "target_mask": target_r,
+            "target_mask": instance_mask_tensor,
             "ignore_mask": ignore_r,
             "box_prompt": box_prompt,
             "point_prompt": point_prompt,

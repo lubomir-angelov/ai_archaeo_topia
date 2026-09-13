@@ -13,6 +13,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
@@ -227,6 +228,158 @@ def validate_sample_row(row: dict[str, Any]) -> None:
         raise ValueError(f"Malformed center_point (expected [x, y]): {point}")
 
 
+def count_connected_components(
+    binary_mask: np.ndarray,
+    connectivity: int = 8,
+) -> int:
+    """Count connected foreground components in a binary mask.
+
+    Args:
+        binary_mask: 2D binary mask array where foreground > 0.
+        connectivity: Connected-component connectivity, either 4 or 8.
+
+    Returns:
+        Number of connected foreground components.
+    """
+    from scipy.ndimage import label
+
+    structured = binary_mask > 0
+    if not structured.any():
+        return 0
+
+    if connectivity == 8:
+        structure = np.ones((3, 3), dtype=int)
+    else:
+        structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+
+    _, num_features = label(structured, structure=structure)
+    return num_features
+
+
+def select_instance_mask(
+    semantic_mask: np.ndarray,
+    center_point_xy: tuple[float, float],
+    bbox_xyxy: tuple[float, float, float, float],
+    connectivity: int = 8,
+    sample_id: str = "",
+) -> np.ndarray:
+    """Select one connected component from a semantic mask.
+
+    Selection priority:
+        1. Component containing the center point.
+        2. Component with largest intersection area with the bbox.
+        3. Component whose bounding box has highest IoU with the prompt bbox.
+        4. Raise ValueError if no foreground components exist.
+
+    Args:
+        semantic_mask: Binary mask with foreground > 0.
+        center_point_xy: Prompt center point ``(x, y)``.
+        bbox_xyxy: Prompt bbox ``(x1, y1, x2, y2)``.
+        connectivity: Connected-component connectivity, 4 or 8.
+        sample_id: Sample identifier for error context.
+
+    Returns:
+        Binary uint8 mask with only the selected component.
+
+    Raises:
+        ValueError: If no foreground component can be selected.
+    """
+    from scipy.ndimage import label
+
+    foreground = semantic_mask > 0
+    if not foreground.any():
+        ctx = f" (sample_id={sample_id})" if sample_id else ""
+        raise ValueError(f"No foreground pixels in semantic mask{ctx}")
+
+    if connectivity == 8:
+        structure = np.ones((3, 3), dtype=int)
+    else:
+        structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+
+    labeled, num_features = label(foreground, structure=structure)
+    if num_features == 0:
+        ctx = f" (sample_id={sample_id})" if sample_id else ""
+        raise ValueError(f"No connected components found in semantic mask{ctx}")
+
+    h, w = foreground.shape
+    cx, cy = center_point_xy
+    x1, y1, x2, y2 = bbox_xyxy
+
+    clamped_cx = int(np.clip(round(cx), 0, w - 1))
+    clamped_cy = int(np.clip(round(cy), 0, h - 1))
+
+    clamped_x1 = int(np.clip(round(x1), 0, w - 1))
+    clamped_y1 = int(np.clip(round(y1), 0, h - 1))
+    clamped_x2 = int(np.clip(round(x2), 1, w))
+    clamped_y2 = int(np.clip(round(y2), 1, h))
+
+    if clamped_x1 >= clamped_x2:
+        clamped_x1 = max(0, clamped_x2 - 1)
+    if clamped_y1 >= clamped_y2:
+        clamped_y1 = max(0, clamped_y2 - 1)
+
+    # Priority 1: component containing center point
+    if foreground[clamped_cy, clamped_cx]:
+        target_label = labeled[clamped_cy, clamped_cx]
+        if target_label >= 1:
+            result = np.zeros_like(semantic_mask, dtype=np.uint8)
+            result[labeled == target_label] = 1
+            return result
+
+    # Priority 2: largest intersection with bbox
+    best_label = 1
+    best_intersection = -1.0
+
+    for comp_label in range(1, num_features + 1):
+        comp_mask = labeled == comp_label
+        bbox_mask = np.zeros_like(foreground, dtype=bool)
+        bbox_mask[clamped_y1:clamped_y2, clamped_x1:clamped_x2] = True
+        intersection = float((comp_mask & bbox_mask).sum())
+        if intersection > best_intersection:
+            best_intersection = intersection
+            best_label = comp_label
+
+    if best_intersection > 0:
+        result = np.zeros_like(semantic_mask, dtype=np.uint8)
+        result[labeled == best_label] = 1
+        return result
+
+    # Priority 3: highest bbox IoU
+    def _bbox_from_mask(mask: np.ndarray) -> tuple[int, int, int, int]:
+        ys, xs = np.where(mask)
+        return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+    def _bbox_iou(
+        a: tuple[int, int, int, int],
+        b: tuple[int, int, int, int],
+    ) -> float:
+        ix1 = max(a[0], b[0])
+        iy1 = max(a[1], b[1])
+        ix2 = min(a[2], b[2])
+        iy2 = min(a[3], b[3])
+        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        area_a = (a[2] - a[0]) * (a[3] - a[1]) if a[2] > a[0] and a[3] > a[1] else 1
+        area_b = (b[2] - b[0]) * (b[3] - b[1]) if b[2] > b[0] and b[3] > b[1] else 1
+        union = area_a + area_b - inter
+        return inter / union if union > 0 else 0.0
+
+    prompt_bbox = (clamped_x1, clamped_y1, clamped_x2, clamped_y2)
+    best_label = 1
+    best_iou = -1.0
+
+    for comp_label in range(1, num_features + 1):
+        comp_mask = labeled == comp_label
+        comp_bbox = _bbox_from_mask(comp_mask)
+        iou = _bbox_iou(comp_bbox, prompt_bbox)
+        if iou > best_iou:
+            best_iou = iou
+            best_label = comp_label
+
+    result = np.zeros_like(semantic_mask, dtype=np.uint8)
+    result[labeled == best_label] = 1
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
@@ -329,9 +482,27 @@ class MapSamDataset(Dataset):
         point_prompt = scale_point(row["center_point"], orig_h, orig_w, self.image_size)
         point_label = torch.tensor([1], dtype=torch.int64)
 
+        # Select the instance-specific target mask from the resized semantic mask
+        semantic_mask_np = target_r.squeeze(0).cpu().numpy()
+        instance_mask_np = select_instance_mask(
+            semantic_mask=semantic_mask_np,
+            center_point_xy=(
+                float(point_prompt[0]),
+                float(point_prompt[1]),
+            ),
+            bbox_xyxy=(
+                float(box_prompt[0]),
+                float(box_prompt[1]),
+                float(box_prompt[2]),
+                float(box_prompt[3]),
+            ),
+            sample_id=row["sample_id"],
+        )
+        instance_mask_tensor = torch.tensor(instance_mask_np, dtype=torch.float32).unsqueeze(0)
+
         result: dict[str, Any] = {
             "image": image_r,
-            "target_mask": target_r,
+            "target_mask": instance_mask_tensor,
             "ignore_mask": ignore_r,
             "box_prompt": box_prompt,
             "point_prompt": point_prompt,

@@ -1,108 +1,112 @@
-"""Sanity-check script for SAM v1 installation and checkpoint loading."""
+"""Verify SAM installation and checkpoint loading.
+
+CLI entrypoint for checking that the Segment-Anything model can be imported,
+a checkpoint file exists, and the model loads on the available device.
+"""
 
 import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Final
 
-logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+log = logging.getLogger(__name__)
 
-_SUPPORTED_MODEL_TYPES: Final[list[str]] = ["vit_b", "vit_l", "vit_h"]
+SUPPORTED_MODEL_TYPES = ("vit_b", "vit_l", "vit_h")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse command-line arguments.
+    """Parse command-line arguments."""
 
-    Args:
-        argv: Argument list. Defaults to ``sys.argv[1:]``.
-
-    Returns:
-        Parsed namespace with ``model_type`` and ``checkpoint``.
-    """
     parser = argparse.ArgumentParser(
-        description="Verify SAM v1 installation and checkpoint loading.",
+        description="Verify SAM installation and checkpoint loading.",
     )
     parser.add_argument(
         "--model-type",
-        required=True,
-        choices=_SUPPORTED_MODEL_TYPES,
-        help="SAM model variant: vit_b, vit_l, or vit_h.",
+        type=str,
+        default="vit_b",
+        choices=SUPPORTED_MODEL_TYPES,
+        help="SAM model type (default: vit_b).",
     )
     parser.add_argument(
         "--checkpoint",
-        required=True,
-        help="Path to the SAM checkpoint .pth file.",
+        type=str,
+        default=str(Path("models/checkpoints/sam/sam_vit_b_01ec64.pth")),
+        help="Path to SAM checkpoint file.",
     )
     return parser.parse_args(argv)
 
 
-def check_sam_setup(model_type: str, checkpoint_path: str) -> None:
-    """Load a SAM checkpoint and log diagnostic information.
+def check_sam_setup(model_type: str, checkpoint_path: str) -> bool:
+    """Load SAM model and log diagnostics.
 
     Args:
-        model_type: SAM model variant identifier.
-        checkpoint_path: Path to the checkpoint file.
+        model_type: SAM model variant identifier (vit_b, vit_l, vit_h).
+        checkpoint_path: Filesystem path to the checkpoint ``.pth`` file.
 
-    Raises:
-        SystemExit: If the checkpoint cannot be loaded or the model type
-            is unsupported.
+    Returns:
+        True if all checks pass, False otherwise.
     """
+
     checkpoint = Path(checkpoint_path)
 
+    # -- Verify checkpoint exists --
     if not checkpoint.is_file():
-        logger.error("Checkpoint not found: %s", checkpoint)
-        sys.exit(1)
+        log.error("Checkpoint not found: %s", checkpoint)
+        return False
 
+    log.info("Checkpoint: %s", checkpoint)
+
+    # -- Import SAM --
     try:
         from segment_anything import sam_model_registry
     except ImportError as exc:
-        logger.error(
-            "segment_anything is not installed. Install it with:\n"
-            "  python -m pip install "
-            '"git+https://github.com/facebookresearch/segment-anything.git"',
-        )
-        raise SystemExit(1) from exc
+        log.error("Failed to import segment_anything: %s", exc)
+        return False
 
-    if model_type not in _SUPPORTED_MODEL_TYPES:
-        logger.error(
-            "Unsupported model type '%s'. Choose from: %s",
-            model_type,
-            ", ".join(_SUPPORTED_MODEL_TYPES),
-        )
-        sys.exit(1)
+    log.info("segment_anything imported successfully")
 
-    import torch
+    # -- Detect device --
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+    except ImportError as exc:
+        log.error("Failed to import torch: %s", exc)
+        return False
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if cuda_available else "cpu"
+    log.info("CUDA available: %s", cuda_available)
+    log.info("Device: %s", device)
 
-    logger.info("Loading SAM model: %s", model_type)
-    logger.info("Checkpoint path: %s", checkpoint)
-    logger.info("CUDA available: %s", torch.cuda.is_available())
-    logger.info("Selected device: %s", device)
-
+    # -- Load model --
     try:
         model = sam_model_registry[model_type](checkpoint=str(checkpoint))
+        model.to(device=device)
+        model.eval()
     except Exception as exc:
-        logger.error("Failed to load checkpoint: %s", exc)
-        sys.exit(1)
+        log.error("Failed to load SAM model (%s): %s", model_type, exc)
+        return False
 
-    model.to(device=device)
-    model.eval()
-
-    logger.info("Model loaded successfully.")
-    logger.info("Model: %s", model)
+    log.info("Model type: %s", model_type)
+    log.info("SAM model loaded successfully on %s", device)
+    return True
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Entry point for the CLI sanity check."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(levelname)s %(message)s",
-    )
+    """Run SAM setup verification."""
 
     args = parse_args(argv)
-    check_sam_setup(args.model_type, args.checkpoint)
+
+    success = check_sam_setup(args.model_type, args.checkpoint)
+
+    if success:
+        log.info("SAM setup check PASSED")
+    else:
+        log.error("SAM setup check FAILED")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
