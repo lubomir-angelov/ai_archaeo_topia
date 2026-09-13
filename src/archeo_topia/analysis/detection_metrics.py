@@ -54,12 +54,18 @@ class Detection:
         x: Centre x in source pixels.
         y: Centre y in source pixels.
         score: Detector confidence, higher is better.
+        box: Optional source-coordinate ``(x0, y0, x1, y1)``. Carried so the
+            end-to-end stage can compare MapSAM prompted with the detector's
+            own box against MapSAM prompted with a fixed-size box on the same
+            centre. v0.4 measured prompt *translation* only, so box scale is an
+            untested variable and the two arms separate it.
     """
 
     image: str
     x: float
     y: float
     score: float
+    box: tuple[float, float, float, float] | None = None
 
 
 @dataclass(frozen=True)

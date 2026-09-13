@@ -326,9 +326,12 @@ handful of representative mound templates is cheap and answers a question the
 rest of the plan depends on: how consistent is the symbol within the series,
 and how much of the problem is available without learning anything?
 
-Implement with `scipy.signal.fftconvolve` rather than adding an OpenCV
-dependency for one function. Templates come from training-fold sheets only;
-evaluation is on the held-out sheet, same folds, same metrics as step 4.
+Implement with `cv2.matchTemplate` and `TM_CCOEFF_NORMED`. An earlier draft of
+this plan specified `scipy.signal.fftconvolve` to avoid adding an OpenCV
+dependency; that was wrong — `opencv-python` is already in `requirements.txt`
+and in the `sam`/`sam2` extras, and `matchTemplate` *is* the operation being
+described. Templates come from training-fold sheets only; evaluation is on the
+held-out sheet, same folds, same metrics as step 4.
 
 The result is informative in both directions. If NCC reaches a high
 recall@5px cross-sheet, the learned detector has a real bar to clear and the

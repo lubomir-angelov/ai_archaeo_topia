@@ -176,6 +176,7 @@ def predict_fold(
                         x=(bx0 + bx1) / 2 + x0,
                         y=(by0 + by1) / 2 + y0,
                         score=float(score),
+                        box=(bx0 + x0, by0 + y0, bx1 + x0, by1 + y0),
                     )
                 )
 
