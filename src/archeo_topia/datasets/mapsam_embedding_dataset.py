@@ -182,6 +182,10 @@ class MapSamEmbeddingDataset(Dataset):
             "sample_id": row["sample_id"],
             "sheet_id": str(row.get("sheet_id", "")),
             "image_path": str(row["image_path"]),
+            # Cached embeddings are whole-tile by construction, so the window
+            # is the tile.  Emitted anyway so cached and windowed runs expose
+            # the same field and can be scored on the same grid.
+            "window_xyxy": torch.tensor([0, 0, orig_w, orig_h], dtype=torch.float32),
         }
 
         if self.return_original_size:
