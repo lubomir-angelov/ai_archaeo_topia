@@ -1,0 +1,85 @@
+{
+  "run": "v0_3_res_a_fulltile_pw20",
+  "stats_file": "artifacts/models/mapsam/v0_3_res_a_fulltile_pw20/prediction_stats_val_e50.jsonl",
+  "logit_resolution": 256,
+  "encoder_token_grid": 64,
+  "overall": {
+    "group": "all",
+    "samples": 34,
+    "mean_iou": 0.6021,
+    "median_iou": 0.5982,
+    "min_iou": 0.2857,
+    "max_iou": 1.0,
+    "mean_dice": 0.7372,
+    "median_dice": 0.7483,
+    "zero_iou_count": 0,
+    "zero_iou_rate": 0.0,
+    "frac_iou_ge_025": 1.0,
+    "frac_iou_ge_050": 0.7059,
+    "frac_iou_ge_075": 0.1471,
+    "mean_gt_px": 5.88,
+    "mean_pred_px": 6.0,
+    "pred_gt_area_ratio": 1.02,
+    "mean_abs_error_px": 3.12,
+    "mean_encoder_tokens": 0.606
+  },
+  "buckets": [
+    {
+      "group": "1-9 px",
+      "samples": 34,
+      "mean_iou": 0.6021,
+      "median_iou": 0.5982,
+      "min_iou": 0.2857,
+      "max_iou": 1.0,
+      "mean_dice": 0.7372,
+      "median_dice": 0.7483,
+      "zero_iou_count": 0,
+      "zero_iou_rate": 0.0,
+      "frac_iou_ge_025": 1.0,
+      "frac_iou_ge_050": 0.7059,
+      "frac_iou_ge_075": 0.1471,
+      "mean_gt_px": 5.88,
+      "mean_pred_px": 6.0,
+      "pred_gt_area_ratio": 1.02,
+      "mean_abs_error_px": 3.12,
+      "mean_encoder_tokens": 0.606
+    },
+    {
+      "group": "10-39 px",
+      "samples": 0
+    },
+    {
+      "group": "40-99 px",
+      "samples": 0
+    },
+    {
+      "group": "100+ px",
+      "samples": 0
+    }
+  ],
+  "sheets": [
+    {
+      "group": "K-35-8-G-a",
+      "samples": 34,
+      "mean_iou": 0.6021,
+      "median_iou": 0.5982,
+      "min_iou": 0.2857,
+      "max_iou": 1.0,
+      "mean_dice": 0.7372,
+      "median_dice": 0.7483,
+      "zero_iou_count": 0,
+      "zero_iou_rate": 0.0,
+      "frac_iou_ge_025": 1.0,
+      "frac_iou_ge_050": 0.7059,
+      "frac_iou_ge_075": 0.1471,
+      "mean_gt_px": 5.88,
+      "mean_pred_px": 6.0,
+      "pred_gt_area_ratio": 1.02,
+      "mean_abs_error_px": 3.12,
+      "mean_encoder_tokens": 0.606
+    }
+  ],
+  "size_iou_correlation": 0.0166,
+  "size_iou_rank_correlation": 0.0911,
+  "size_abs_error_rank_correlation": 0.0644
+}

@@ -1,0 +1,4 @@
+run,eval_sheets,train_sheets,train_subsample,window_px,epochs,final_iou,final_dice,peak_iou_oracle,peak_epoch_oracle,eval_samples,median_iou,min_iou,max_iou,zero_iou_count,frac_iou_ge_025,frac_iou_ge_050,frac_iou_ge_075,mean_gt_px,mean_pred_px,pred_gt_area_ratio,mean_abs_error_px,mean_abs_error_source_px,mean_gt_area_source_px,mean_logit_max,mean_logit_min,mean_prob_in_gt,mean_prob_in_background
+v0_3_res_a_fulltile_pw20,,,,,50,0.6021,0.7372,0.6689,5,34,0.5982,0.2857,1.0,0,1.0,0.7059,0.1471,5.88,6.0,1.02,3.12,253.9,479.0,25.32,-63.0,0.7709,2.641e-05
+v0_3_res_b_window1024_pw20,,,,1024,50,0.7567,0.8584,0.8027,5,34,0.7422,0.5,0.9444,0,1.0,1.0,0.4706,29.41,30.24,1.028,8.47,135.5,470.6,60.95,-124.79,0.8762,7.011e-05
+v0_3_res_c_window512_pw20,,,,512,50,0.8261,0.9038,0.836,15,34,0.844,0.6887,0.9091,0,1.0,1.0,0.9118,117.59,123.35,1.049,22.94,91.8,470.4,88.54,-91.25,0.9311,0.00022029

@@ -1,0 +1,4 @@
+group,samples,mean_iou,median_iou,min_iou,max_iou,mean_dice,median_dice,zero_iou_count,zero_iou_rate,frac_iou_ge_025,frac_iou_ge_050,frac_iou_ge_075,mean_gt_px,mean_pred_px,pred_gt_area_ratio,mean_abs_error_px,mean_encoder_tokens
+1-9 px,34,0.6021,0.5982,0.2857,1.0,0.7372,0.7483,0,0.0,1.0,0.7059,0.1471,5.88,6.0,1.02,3.12,0.606
+K-35-8-G-a,34,0.6021,0.5982,0.2857,1.0,0.7372,0.7483,0,0.0,1.0,0.7059,0.1471,5.88,6.0,1.02,3.12,0.606
+all,34,0.6021,0.5982,0.2857,1.0,0.7372,0.7483,0,0.0,1.0,0.7059,0.1471,5.88,6.0,1.02,3.12,0.606
