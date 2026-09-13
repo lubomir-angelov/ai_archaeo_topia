@@ -17,7 +17,9 @@ together in the second arm — a worse prompt and a displaced input — and they
 have to be separated before "512 is fragile" can mean anything.
 
 Lead column is `mean_abs_error_source_px`: symmetric difference converted to
-source-tile pixels. Decoder IoU is not comparable between window sizes, and
+source-tile pixels. It is an **area**, so the unit is px²; prompt offsets in
+the same table are distances, in px. (The field name says `_px` because it is
+inherited from v0.3.) Decoder IoU is not comparable between window sizes, and
 the IoU≥0.5 rate inherits that, so the IoU columns are only readable down a
 column, not across.
 
@@ -47,7 +49,7 @@ unaffected; its GT area is 479.0 at every offset.
 **1. A displaced window is almost free. A displaced prompt is not.**
 
 The control arm is flat: from 0 to 250 px of window displacement the error
-moves 91.8 → 94.2 and every sample still clears IoU 0.5. The window can be
+moves 91.8 → 94.2 px² and every sample still clears IoU 0.5. The window can be
 pushed until the mound is nearly at its edge with no measurable cost. The
 only failure is at 300 px, where the mound is leaving the window entirely
 (GT area down 38%) and 38% of samples fall below IoU 0.5.

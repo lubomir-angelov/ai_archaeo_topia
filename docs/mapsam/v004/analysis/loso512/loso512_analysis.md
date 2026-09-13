@@ -25,8 +25,9 @@ the evaluation sheet.
 
 ## Result
 
-Lead column is source-pixel disagreement area. Decoder IoU is not comparable
-across window sizes; it is shown because the v0.3 tables are in it.
+Lead column is source-pixel disagreement area, in **px²**. Decoder IoU is not
+comparable across window sizes; it is shown because the v0.3 tables are in it.
+Centroid displacements later in this note are distances, in px.
 
 | Fold | eval sheet | n | train | full tile err | **512 err** | reduction | full tile IoU | 512 IoU |
 |---|---|---:|---:|---:|---:|---:|---:|---:|
@@ -52,7 +53,7 @@ Quality distribution and oracle peaks:
 | C | 1.00 | 0.53 | 0.29 | 0.12 | 0 / 17 | 2 / 17 | 0.7574 | 0.8104 @ e5 |
 
 Fold B reproduces the v0.3 resolution arm C exactly — 0.8261 decoder IoU, 91.8
-source px — as it must, since arm C's split-based selection partitions the
+source px² — as it must, since arm C's split-based selection partitions the
 data the same way fold B's sheet-based selection does. That is the
 configuration check for these runs.
 
@@ -60,21 +61,24 @@ configuration check for these runs.
 
 This is unambiguously the plan's first branch: **all three sheets improve
 substantially**, by 64–69% each, and the cross-sheet spread falls by a factor
-of five (119.9 → 24.7 source px).
+of five (119.9 → 24.7 source px²).
 
 Much of what v0.3 measured as domain shift was insufficient spatial
 representation of the mound in a frozen encoder. v0.3's four-fifths ranking
 survives in the sense that fold B is still the best fold, but the gap that
 motivated "map-domain variation is the next bottleneck" has largely closed:
-103.8 macro against 91.8 on the easiest sheet is a 13% spread, where full tile
-was a 47% spread.
+103.8 px² macro against 91.8 px² on the easiest sheet is a 13% spread, where
+full tile was a 47% spread.
 
 Two things this does **not** show.
 
-It does not show that domain robustness is solved. All three sheets are the
-same Soviet 1:50k series. Cross-cartographic behaviour remains entirely
-untested, and it is possible that the residual 24.7 px spread within one
-series understates what a different series would cost.
+It does not show that domain robustness is solved. What it establishes is
+*within-series* consistency: all three sheets are the same Soviet 1:50k
+series, so this revises v0.3's diagnosis of what caused the variation it saw —
+the representation, mostly — without establishing anything about a different
+cartographic source. Cross-cartographic behaviour remains entirely untested,
+and the residual 24.7 px² spread within one series may understate what a
+different series would cost.
 
 It does not show that the epoch-50 degradation is gone. Fold C still peaks at
 epoch 5 (0.8104) and ends at 0.7574, a 6.5% relative drop; fold A drops 1.3%

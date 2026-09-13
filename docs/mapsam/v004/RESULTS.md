@@ -13,8 +13,13 @@ Steps 4–6 were not executed; see *What was not done* at the end.
 
 1. **The 512 px window generalizes across all three sheets, not just the easy
    one.** Source-pixel disagreement area falls 64–69% on every fold, and the
-   cross-sheet spread falls from 119.9 to 24.7 source px. Much of what v0.3
-   read as domain shift was insufficient spatial representation of the mound.
+   cross-sheet spread falls from 119.9 to 24.7 source px². This revises v0.3's
+   central diagnosis rather than extending it: the dominant term in what v0.3
+   measured as domain variation was the representation itself. Sheets differed
+   most where the mound fell furthest below one useful encoder token, and
+   normalizing the representation around the prompt removes most of that
+   difference. A smaller residual sheet effect remains; it is no longer the
+   dominant failure mode.
 2. **Fold A's "prediction collapse" is mostly metric quantization, not
    collapse.** 17 of its 19 zero-IoU samples land within 40 source px of the
    target — inside or just outside a ~21–30 px symbol. At 512 all 19 are gone,
@@ -70,8 +75,14 @@ check that the pass is faithful.
 
 No training. Three arms over 8 compass directions × offsets 0–300 source px,
 on the 34-sample `test` split (`K-35-8-G-a`). Zero-offset rows reproduce the
-v0.3 resolution table exactly: 253.9 source px / 0.6021 for full tile, 91.8 /
+v0.3 resolution table exactly: 253.9 source px² / 0.6021 for full tile, 91.8 /
 0.8261 for 512.
+
+**Units.** Two different quantities appear below and both are in source-tile
+pixels, but one is an area and the other a distance. Disagreement area is
+**px²**; prompt offsets and centroid displacements are **px**. The per-sample
+field is named `abs_error_source_px`, inherited from v0.3, but the quantity it
+holds is an area.
 
 | offset | full tile err | 512 err | 512 advantage | control err (window only) | control ≥0.5 |
 |---:|---:|---:|---:|---:|---:|
@@ -92,7 +103,7 @@ against a partly missing target. The plan's suggested maximum of 200 px never
 reached this regime, which is why the sweep was extended.
 
 **The control arm is the finding.** With the window displaced but the prompt
-left on the truth, error moves 91.8 → 94.2 across 250 px of displacement and
+left on the truth, error moves 91.8 → 94.2 px² across 250 px of displacement and
 every sample still clears IoU 0.5. The 512 window has roughly 250 px of
 placement slack. Its prompt has about 15.
 
@@ -114,7 +125,7 @@ better everywhere.
 
 Directional anisotropy, averaged over offsets 5–25 on the full-tile arm:
 northward offsets cost about 1.4× less than west or southwest (355 vs 531
-source px). Not investigated. Recorded because a single-direction sweep would
+source px²). Not investigated. Recorded because a single-direction sweep would
 have drawn a curve 30% optimistic or pessimistic depending on its choice.
 
 Detail: `analysis/jitter/jitter_analysis.md`.
@@ -141,6 +152,13 @@ The ten zero-pixel cases are a **threshold** problem, not a localization one:
 nine of ten have their peak logit within 6.5–39.6 source px of the target,
 with logit maxima from −13.2 to −0.3. Mean logit max is 0.99 over the 19
 zero-IoU samples against 19.6 over the 101 that score anything.
+
+Worth stating precisely, because it changes what the fix would be: the
+activation is correctly *placed* but **negative**, not strong-and-mis-
+thresholded. The model puts its peak on the right symbol and then declines to
+commit to it. So these are recoverable by a lower decision threshold, but the
+underlying quantity is a decoder that has learned to suppress on the held-out
+sheet, not a miscalibrated cut point on a confident output.
 
 And it is **acquired during training**: 2 zero-IoU at epoch 5 against 19 at
 epoch 50; zero-pixel predictions first appear at epoch 20. Fold A's oracle
@@ -185,7 +203,7 @@ This is the plan's first branch: **all three sheets improve substantially**.
 The 47% spread across sheets at full tile becomes a 13% spread at 512.
 
 Fold B reproduces the v0.3 resolution arm C to four decimals (0.8261, 91.8
-source px), which is the configuration check — arm C's split-based selection
+source px²), which is the configuration check — arm C's split-based selection
 partitions the data exactly as fold B's sheet-based selection does.
 
 **Step 2's prediction holds.** Fold A at 512 has 0 of 120 zero-IoU, 0
@@ -217,10 +235,14 @@ must be: **the same order as the symbol it is finding.**
 That makes candidate generation the binding constraint, and it is what the 530
 `hard_negative_symbol` annotations are for.
 
-Two caveats against over-reading. All three sheets are one Soviet 1:50k
-series, so cross-cartographic behaviour is untested and the residual 24.7 px
-spread may understate it. And nothing here is a test result: every number in
-v0.1–v0.4, LOSO included, is development evidence.
+**What this claim is scoped to.** *Consistent within-series conditional
+segmentation.* All three sheets are one Soviet 1:50k series, so
+cross-cartographic generalization is entirely untested and the residual
+24.7 px² spread may understate it badly. Domain robustness is not solved; what
+is shown is that the dominant term in v0.3's sheet variation was
+representational, and that what remains within this series is small. And
+nothing here is a test result: every number in v0.1–v0.4, LOSO included, is
+development evidence.
 
 ### Ranked next steps
 
@@ -228,20 +250,28 @@ v0.1–v0.4, LOSO included, is development evidence.
    only thing standing between a 0.79 macro IoU and an end-to-end system. Its
    accuracy target is set by step 1: ~15 source px, with useful slack in where
    the window lands but none in where the prompt points.
-2. **Train with prompt jitter.** Both jitter arms used jitter-naive
-   checkpoints. Augmenting training with the same offsets is cheap and is the
-   obvious way to widen the 15 px tolerance before a detector has to meet it.
-   `MapSamDataset` now takes `prompt_jitter_xy`, so this is a config change
-   plus a per-epoch random draw.
+2. **Measure the detector's localization error before changing the
+   segmenter.** Prompt-jitter augmentation is available — `MapSamDataset` now
+   takes `prompt_jitter_xy` — but widening the segmenter's tolerance and
+   tightening the detector's accuracy are two ways to close the same gap, and
+   only one of them is known to be needed. If candidates routinely land within
+   5–8 px there is no reason to train MapSAM to accept 25–30 px prompts, and a
+   reason not to: step 2 found the zero-IoU samples sit closer to their
+   neighbours than average (median nearest-neighbour distance 70 px against
+   98), so deliberate tolerance to large offsets risks trading mound-vs-
+   neighbour discrimination for robustness nobody needs.
 3. **Add sheets, and prefer diverse cartography.** Still the binding
    constraint on any claim about domain robustness, and unchanged by v0.4.
 4. **Establish train / validation / frozen-test splits** once there are enough
    sheets. The epoch-50 drift that step 2 traced is exactly what a validation
    split is for; fold C still loses 6.5% between its peak and epoch 50.
-5. **Do not tune the window further yet.** 256 and 384 px remain untested, but
-   step 1 shows the return on a tighter window is bounded by prompt accuracy,
-   and step 3's remaining sheet spread is small enough that window size is no
-   longer the dominant term.
+5. **Leave 256 and 384 px in the backlog.** They are deprioritized on *value*,
+   not on evidence: nothing here shows a tighter window cannot help. At zero
+   prompt error more token coverage might well reduce the ~92–116 px² residual
+   further, since even 512 puts only 2.76 tokens on a mound. But that is an
+   optimization of something already clearing IoU 0.5 on 99–100% of instances,
+   while the pipeline has no way to produce the prompt at all. Reopen it if
+   the detector becomes good and segmentation becomes the bottleneck again.
 
 Still not recommended: calibration, new losses, encoder variants, unfreezing
 the encoder, or feeding hard negatives into the decoder loss.
@@ -249,10 +279,11 @@ the encoder, or feeding hard negatives into the decoder loss.
 ## What was not done
 
 **Step 4 (locate the resolution optimum)** was conditional on step 3 showing
-broad improvement, which it does. It is nonetheless deprioritized above, on
-step 1's evidence: a tighter window cannot help beyond what prompt accuracy
-allows, and the case for spending runs on 256/384 is weaker than the case for
-building the detector.
+broad improvement, which it does. It is nonetheless deprioritized, for the
+reason given above: the case for spending runs on 256/384 is weaker than the
+case for building the detector. This is a judgment about value, not a finding
+— step 1 says nothing about whether a tighter window helps at zero prompt
+error, and it might.
 
 **Steps 5 and 6 (more sheets, permanent grouped splits)** are blocked on data,
 not deferred by choice. `data/maps`, `data/georeferenced` and
