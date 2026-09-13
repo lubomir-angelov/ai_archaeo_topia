@@ -7,7 +7,7 @@ the MapSAM conversion step.
 
 Usage:
     python -m archeo_topia.datasets.debug_coco_masks \\
-        --coco-json data/curated/datasets/cvat/v0.0.1/annotations/instances_default.json \\
+        --coco-json annotation/cvat/v0.0.1/instances_default.json \\
         --images-dir data/curated/datasets/cvat/v0.0.1/images/default \\
         --output-dir artifacts/debug/raw_coco_masks \\
         --image-name K-34-35-B-g_1.png

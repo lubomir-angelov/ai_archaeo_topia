@@ -10,8 +10,8 @@ exactly one positive mask and one ignore mask.
 
 Usage:
     python -m src.archeo_topia.datasets.prepare_mapsam_coco \\
-        --coco-json data/curated/datasets/cvat/annotations/instances_default.json \\
-        --images-dir data/curated/datasets/cvat/images \\
+        --coco-json annotation/cvat/v0.0.1/instances_default.json \\
+        --images-dir <data-lake>/curated/datasets/cvat/v0.0.1/images/default \\
         --output-dir data/curated/datasets/mapsam_v0 \\
         --positive-label mound \\
         --ignore-label uncertain_ignore \\

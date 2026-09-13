@@ -25,8 +25,10 @@ Background and evidence for the change: `TRAINING_V001_FINDINGS.md`.
 ## Dataset
 
 Rebuilt from the CVAT COCO export
-(`data_lake/curated/datasets/cvat/v0.0.1`) with the current pipeline. Source
-annotations are identical to v0.1; only the derived dataset is new.
+(`annotation/cvat/v0.0.1/instances_default.json`, now tracked in this
+repository) with the current pipeline. Source annotations are identical to
+v0.1; only the derived dataset is new. The map sheet images the export refers
+to are not in the repository and come from the data lake.
 
 | Metric | Value |
 |--------|-------|
@@ -232,7 +234,7 @@ Reproduce with:
 
 ```bash
 python -m archeo_topia.datasets.prepare_mapsam_coco \
-    --coco-json <data_lake>/curated/datasets/cvat/v0.0.1/annotations/instances_default.json \
+    --coco-json annotation/cvat/v0.0.1/instances_default.json \
     --images-dir <data_lake>/curated/datasets/cvat/v0.0.1/images/default \
     --output-dir data/curated/datasets/mapsam_v02 --split-by sheet
 

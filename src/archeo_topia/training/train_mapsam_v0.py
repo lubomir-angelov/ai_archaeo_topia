@@ -16,6 +16,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
@@ -113,6 +114,7 @@ def resolve_config(cfg: dict[str, Any]) -> dict[str, Any]:
     outputs_cfg = result.get("outputs", {})
     outputs_cfg.setdefault("save_debug_predictions", True)
     outputs_cfg.setdefault("debug_prediction_count", 8)
+    outputs_cfg.setdefault("save_last_checkpoint", True)
     result["outputs"] = outputs_cfg
 
     debug_cfg = result.get("debug", {})
@@ -1008,8 +1010,14 @@ def save_checkpoint(
     train_loss: float,
     val_loss: float,
     config: dict[str, Any],
+    include_optimizer: bool = False,
 ) -> None:
     """Save a training checkpoint.
+
+    Archival checkpoints (``best.pt``, ``epoch_N.pt``, ``final.pt``) hold only
+    the trained weights.  AdamW state is roughly twice the size of the weights
+    it tracks and is only useful for resuming, so it is written to the single
+    rolling ``last.pt`` instead of to every file.
 
     Args:
         path: Destination file path.
@@ -1021,21 +1029,140 @@ def save_checkpoint(
         train_loss: Latest training loss.
         val_loss: Latest validation loss.
         config: Resolved configuration dictionary.
+        include_optimizer: Store optimizer state so training can resume
+            exactly. Set only for the rolling ``last.pt``.
     """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "epoch": epoch,
-            "model_type": model_type,
-            "sam_checkpoint": sam_checkpoint,
-            "model_state_dict": sam.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "train_loss": train_loss,
-            "val_loss": val_loss,
-            "config": config,
-        },
-        str(path),
+
+    # Save only the parameters that were actually trained.  With the image
+    # encoder frozen, a full state_dict is ~358 MB of which ~342 MB is a
+    # byte-identical copy of the stock SAM weights the model was built from,
+    # so the frozen modules are recoverable from *sam_checkpoint* alone.
+    # Which modules are trainable is config-driven, so derive the set from
+    # requires_grad rather than hard-coding the mask decoder.
+    trainable_names = {name for name, p in sam.named_parameters() if p.requires_grad}
+    full_state = sam.state_dict()
+    partial_state = {k: v for k, v in full_state.items() if k in trainable_names}
+
+    payload: dict[str, Any] = {
+        "epoch": epoch,
+        "model_type": model_type,
+        "sam_checkpoint": sam_checkpoint,
+        "state_dict_scope": "trainable",
+        "model_state_dict": partial_state,
+        "train_loss": train_loss,
+        "val_loss": val_loss,
+        "config": config,
+        "has_optimizer_state": include_optimizer,
+        # Pins the base the frozen half must come from.  Without this a
+        # mismatched base loads cleanly and predicts nonsense.
+        "frozen_weights_sha256": frozen_weights_digest(full_state, trainable_names),
+    }
+    if include_optimizer:
+        payload["optimizer_state_dict"] = optimizer.state_dict()
+
+    logger.info(
+        "Saving %s: %d/%d tensors (%.1f MB of %.1f MB)%s; frozen weights come from %s",
+        Path(path).name,
+        len(partial_state),
+        len(full_state),
+        _state_dict_bytes(partial_state) / 1048576,
+        _state_dict_bytes(full_state) / 1048576,
+        " + optimizer state" if include_optimizer else "",
+        sam_checkpoint,
     )
+
+    torch.save(payload, str(path))
+
+
+def frozen_weights_digest(
+    state: dict[str, torch.Tensor],
+    trainable_names: set[str],
+) -> str:
+    """Digest the weights a partial checkpoint does *not* store.
+
+    A trainable-only checkpoint is meaningless without the frozen weights the
+    model was built from, and a mismatched base is silently wrong rather than
+    loudly broken: the shapes still fit, so the model loads and predicts
+    nonsense.  Recording a digest of the frozen tensors at save time lets the
+    load path prove the base matches.
+
+    The digest covers the tensors as they exist in the model, not the file
+    they came from, so it holds however the base weights were obtained.
+
+    Args:
+        state: Full model state dict.
+        trainable_names: Names of the tensors the checkpoint stores itself.
+
+    Returns:
+        Hex SHA-256 over the frozen tensors, in sorted name order.
+    """
+    h = hashlib.sha256()
+    for name in sorted(k for k in state if k not in trainable_names):
+        tensor = state[name]
+        h.update(name.encode("utf-8"))
+        h.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+    return h.hexdigest()
+
+
+def file_digest(path: str | Path) -> str:
+    """SHA-256 of a file, read in chunks.
+
+    Args:
+        path: File to hash.
+
+    Returns:
+        Hex SHA-256 digest.
+    """
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def build_metrics_record(
+    epoch: int,
+    train_metrics: dict[str, Any],
+    val_metrics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build one epoch's entry for ``metrics.json``.
+
+    Per-sample rows are dropped from both the train and val blocks: they are
+    written to the ``prediction_stats_*.jsonl`` files instead.  Keeping a
+    second copy here made metrics.json 19 MB for a 200-epoch run, 12.9 MB of
+    which was the val rows alone, for a file whose point is the epoch curves.
+    The ``prediction_stats_aggregate`` summaries are kept.
+
+    Args:
+        epoch: Epoch number (1-indexed).
+        train_metrics: Metrics returned by the training pass.
+        val_metrics: Metrics returned by the validation pass, or ``None``
+            when the epoch was not validated.
+
+    Returns:
+        The record to append to the metrics history.
+    """
+    drop = "prediction_stats"
+    return {
+        "epoch": epoch,
+        "train": {k: v for k, v in train_metrics.items() if k != drop},
+        "val": (
+            {k: v for k, v in val_metrics.items() if k != drop} if val_metrics else val_metrics
+        ),
+    }
+
+
+def _state_dict_bytes(state: dict[str, torch.Tensor]) -> int:
+    """Total size in bytes of the tensors in a state dict.
+
+    Args:
+        state: Mapping of parameter name to tensor.
+
+    Returns:
+        Combined size of all tensors in bytes.
+    """
+    return sum(t.numel() * t.element_size() for t in state.values() if torch.is_tensor(t))
 
 
 def load_checkpoint(
@@ -1045,18 +1172,75 @@ def load_checkpoint(
 ) -> dict[str, Any]:
     """Load a training checkpoint.
 
+    Handles both checkpoint layouts:
+
+    ``state_dict_scope == "trainable"``
+        Only the trained parameters are stored.  *sam* must already carry the
+        stock weights it was built from, which is how :func:`build_sam` and
+        every caller construct it; the trained tensors are layered on top.
+
+    Legacy checkpoints (no ``state_dict_scope`` key)
+        The whole model was stored; loaded strictly as before.
+
     Args:
         path: Checkpoint file path.
-        sam: SAM model to restore weights into.
+        sam: SAM model to restore weights into, already built from the base
+            SAM checkpoint named by the training config.
         optimizer: Optimizer to restore state into. May be ``None``
             when loading for inference only.
 
     Returns:
         Checkpoint dictionary.
+
+    Raises:
+        ValueError: If a partial checkpoint carries tensors the model does not
+            have, which means it was built for a different model type.
     """
     ckpt = torch.load(str(path), map_location="cpu", weights_only=False)
-    sam.load_state_dict(ckpt["model_state_dict"])
+    state = ckpt["model_state_dict"]
+
+    if ckpt.get("state_dict_scope") == "trainable":
+        expected = ckpt.get("frozen_weights_sha256")
+        if expected:
+            # Verify before loading, while the model still holds only the
+            # base weights.  A mismatched base is silently wrong rather than
+            # broken: the shapes fit, so it would load and predict nonsense.
+            actual = frozen_weights_digest(sam.state_dict(), set(state))
+            if actual != expected:
+                raise ValueError(
+                    f"Checkpoint {path} was trained on a different set of frozen weights "
+                    f"than this model carries (expected {expected[:16]}..., got "
+                    f"{actual[:16]}...). Build the model from "
+                    f"{ckpt.get('sam_checkpoint', 'the base SAM checkpoint')} and retry; "
+                    f"loading it as-is would produce a model that runs but is wrong."
+                )
+
+        incompatible = sam.load_state_dict(state, strict=False)
+        if incompatible.unexpected_keys:
+            raise ValueError(
+                f"Checkpoint {path} contains {len(incompatible.unexpected_keys)} tensors "
+                f"absent from this model (first: {incompatible.unexpected_keys[0]}). "
+                f"It was saved for model_type={ckpt.get('model_type')!r}."
+            )
+        logger.info(
+            "Loaded %d trained tensors from %s; frozen weights %s from %s",
+            len(state),
+            path,
+            "verified" if expected else "unverified (checkpoint predates pinning)",
+            ckpt.get("sam_checkpoint", "the base SAM checkpoint"),
+        )
+    else:
+        sam.load_state_dict(state)
+        logger.info("Loaded full state dict (legacy checkpoint) from %s", path)
+
     if optimizer is not None:
+        if "optimizer_state_dict" not in ckpt:
+            raise ValueError(
+                f"Checkpoint {path} carries no optimizer state, so training cannot resume "
+                f"from it exactly. Archival checkpoints store weights only; resume from the "
+                f"rolling 'last.pt' in the same directory, or pass optimizer=None to load "
+                f"the weights for inference or a fresh fine-tune."
+            )
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
     return ckpt
 
@@ -1245,6 +1429,7 @@ def main(argv: list[str] | None = None) -> None:
     max_train = training_cfg.get("max_train_batches")
     max_val = training_cfg.get("max_val_batches")
     save_every = training_cfg.get("save_every_epochs", 5)
+    save_last = outputs_cfg.get("save_last_checkpoint", True)
     val_every = training_cfg.get("validate_every_epochs", 1)
 
     logger.info(
@@ -1364,11 +1549,24 @@ def main(argv: list[str] | None = None) -> None:
                 cfg,
             )
 
-        record = {
-            "epoch": epoch,
-            "train": {k: v for k, v in train_metrics.items() if k != "prediction_stats"},
-            "val": val_metrics,
-        }
+            # Refresh the single rolling resume point.  This is the only file
+            # that carries optimizer state, so an interrupted run loses at
+            # most save_every_epochs epochs rather than the whole run.
+            if save_last:
+                save_checkpoint(
+                    checkpoints_dir / "last.pt",
+                    sam,
+                    optimizer,
+                    epoch,
+                    model_cfg["model_type"],
+                    str(sam_ckpt),
+                    train_metrics["loss"],
+                    val_metrics["loss"] if val_metrics else float("inf"),
+                    cfg,
+                    include_optimizer=True,
+                )
+
+        record = build_metrics_record(epoch, train_metrics, val_metrics)
         metrics_history.append(record)
 
         if log_stats and "prediction_stats" in train_metrics:
@@ -1394,6 +1592,20 @@ def main(argv: list[str] | None = None) -> None:
         val_metrics["loss"] if val_metrics else float("inf"),
         cfg,
     )
+
+    if save_last:
+        save_checkpoint(
+            checkpoints_dir / "last.pt",
+            sam,
+            optimizer,
+            epochs,
+            model_cfg["model_type"],
+            str(sam_ckpt),
+            train_metrics["loss"],
+            val_metrics["loss"] if val_metrics else float("inf"),
+            cfg,
+            include_optimizer=True,
+        )
 
     final_record = {
         "epochs": epochs,

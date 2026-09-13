@@ -384,7 +384,7 @@ mapsam-prepare:
 
 mapsam-prepare-v0:
 	@$(MAKE) mapsam-prepare \
-		COCO_JSON=data/curated/datasets/cvat/v0.0.1/annotations/instances_default.json \
+		COCO_JSON=annotation/cvat/v0.0.1/instances_default.json \
 		IMAGES_DIR=data/curated/datasets/cvat/v0.0.1/images/default \
 		OUTPUT_DIR=data/curated/datasets/mapsam_v0
 

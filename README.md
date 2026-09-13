@@ -59,7 +59,7 @@ sheet-level splits (no cross-sheet leakage).
 
 ```bash
 python -m src.archeo_topia.datasets.prepare_mapsam_coco \
-  --coco-json data/curated/datasets/cvat/v0.0.1/annotations/instances_default.json \
+  --coco-json annotation/cvat/v0.0.1/instances_default.json \
   --images-dir data/curated/datasets/cvat/v0.0.1/images/default \
   --output-dir data/curated/datasets/mapsam_v0 \
   --positive-label mound \
@@ -83,7 +83,7 @@ data/curated/datasets/mapsam_v0/
 Example output:
 
 ```
-INFO Loading COCO JSON from data/curated/datasets/cvat/v0.0.1/annotations/instances_default.json
+INFO Loading COCO JSON from annotation/cvat/v0.0.1/instances_default.json
 INFO Category IDs — positive=1, ignore=3, hard_negative=2
 INFO Found 12 images in COCO index
 INFO Split assignment: {'train': 2, 'val': 0, 'test': 1}
