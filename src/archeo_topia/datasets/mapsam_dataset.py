@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
@@ -227,6 +229,228 @@ def validate_sample_row(row: dict[str, Any]) -> None:
         raise ValueError(f"Malformed center_point (expected [x, y]): {point}")
 
 
+def count_connected_components(
+    binary_mask: np.ndarray,
+    connectivity: int = 8,
+) -> int:
+    """Count connected foreground components in a binary mask.
+
+    Args:
+        binary_mask: 2D binary mask array where foreground > 0.
+        connectivity: Connected-component connectivity, either 4 or 8.
+
+    Returns:
+        Number of connected foreground components.
+    """
+    from scipy.ndimage import label
+
+    structured = binary_mask > 0
+    if not structured.any():
+        return 0
+
+    if connectivity == 8:
+        structure = np.ones((3, 3), dtype=int)
+    else:
+        structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+
+    _, num_features = label(structured, structure=structure)
+    return num_features
+
+
+def _label_foreground(
+    foreground: np.ndarray,
+    connectivity: int = 8,
+) -> tuple[np.ndarray, int]:
+    """Label connected components of a boolean foreground mask.
+
+    Args:
+        foreground: 2D boolean array.
+        connectivity: Connected-component connectivity, either 4 or 8.
+
+    Returns:
+        Tuple of ``(labeled_array, num_features)``.
+    """
+    from scipy.ndimage import label
+
+    if connectivity == 8:
+        structure = np.ones((3, 3), dtype=int)
+    else:
+        structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+
+    return label(foreground, structure=structure)
+
+
+@lru_cache(maxsize=32)
+def load_binary_mask_cached(mask_path: str) -> torch.Tensor:
+    """Load a binary mask file, cached by path.
+
+    Sheet masks are shared by every sample generated from that sheet, so the
+    uncached loader re-decodes the same multi-megapixel PNG once per sample.
+
+    Args:
+        mask_path: Path to the binary mask file.
+
+    Returns:
+        Mask tensor of shape ``(1, H, W)``.  Shared across callers, so
+        treat it as read-only.
+    """
+    return load_binary_mask(Path(mask_path))
+
+
+@lru_cache(maxsize=32)
+def label_mask_file(
+    mask_path: str,
+    connectivity: int = 8,
+) -> tuple[np.ndarray, int]:
+    """Label a mask file's connected components, cached by path.
+
+    Every sample generated from one map sheet shares that sheet's mask file,
+    so labeling it per sample re-does the same work up to 56 times per epoch.
+    Labeling a full-resolution sheet costs ~200 ms, which dominated dataset
+    throughput; caching per file makes it a one-off.
+
+    The returned array is marked read-only because it is shared across every
+    caller holding the same cache entry.
+
+    Args:
+        mask_path: Path to the binary mask file.
+        connectivity: Connected-component connectivity, either 4 or 8.
+
+    Returns:
+        Tuple of ``(labeled_array, num_features)``.
+    """
+    mask = load_binary_mask(Path(mask_path)).squeeze(0).numpy()
+    labeled, num_features = _label_foreground(mask > 0, connectivity)
+    labeled.flags.writeable = False
+    return labeled, num_features
+
+
+def select_instance_mask(
+    semantic_mask: np.ndarray,
+    center_point_xy: tuple[float, float],
+    bbox_xyxy: tuple[float, float, float, float],
+    connectivity: int = 8,
+    sample_id: str = "",
+    labeled_components: tuple[np.ndarray, int] | None = None,
+) -> np.ndarray:
+    """Select one connected component from a semantic mask.
+
+    Selection priority:
+        1. Component containing the center point.
+        2. Component with largest intersection area with the bbox.
+        3. Component whose bounding box has highest IoU with the prompt bbox.
+        4. Raise ValueError if no foreground components exist.
+
+    Args:
+        semantic_mask: Binary mask with foreground > 0.
+        center_point_xy: Prompt center point ``(x, y)``.
+        bbox_xyxy: Prompt bbox ``(x1, y1, x2, y2)``.
+        connectivity: Connected-component connectivity, 4 or 8.
+        sample_id: Sample identifier for error context.
+        labeled_components: Optional precomputed ``(labeled, num_features)``
+            for *semantic_mask*, as returned by :func:`label_mask_file`.
+            Supplying it skips the labeling step, which dominates runtime on
+            full-resolution sheet masks.
+
+    Returns:
+        Binary uint8 mask with only the selected component.
+
+    Raises:
+        ValueError: If no foreground component can be selected.
+    """
+    foreground = semantic_mask > 0
+    if not foreground.any():
+        ctx = f" (sample_id={sample_id})" if sample_id else ""
+        raise ValueError(f"No foreground pixels in semantic mask{ctx}")
+
+    if labeled_components is not None:
+        labeled, num_features = labeled_components
+    else:
+        labeled, num_features = _label_foreground(foreground, connectivity)
+
+    if num_features == 0:
+        ctx = f" (sample_id={sample_id})" if sample_id else ""
+        raise ValueError(f"No connected components found in semantic mask{ctx}")
+
+    h, w = foreground.shape
+    cx, cy = center_point_xy
+    x1, y1, x2, y2 = bbox_xyxy
+
+    clamped_cx = int(np.clip(round(cx), 0, w - 1))
+    clamped_cy = int(np.clip(round(cy), 0, h - 1))
+
+    clamped_x1 = int(np.clip(round(x1), 0, w - 1))
+    clamped_y1 = int(np.clip(round(y1), 0, h - 1))
+    clamped_x2 = int(np.clip(round(x2), 1, w))
+    clamped_y2 = int(np.clip(round(y2), 1, h))
+
+    if clamped_x1 >= clamped_x2:
+        clamped_x1 = max(0, clamped_x2 - 1)
+    if clamped_y1 >= clamped_y2:
+        clamped_y1 = max(0, clamped_y2 - 1)
+
+    # Priority 1: component containing center point
+    if foreground[clamped_cy, clamped_cx]:
+        target_label = labeled[clamped_cy, clamped_cx]
+        if target_label >= 1:
+            result = np.zeros_like(semantic_mask, dtype=np.uint8)
+            result[labeled == target_label] = 1
+            return result
+
+    # Priority 2: largest intersection with bbox
+    best_label = 1
+    best_intersection = -1.0
+
+    for comp_label in range(1, num_features + 1):
+        comp_mask = labeled == comp_label
+        bbox_mask = np.zeros_like(foreground, dtype=bool)
+        bbox_mask[clamped_y1:clamped_y2, clamped_x1:clamped_x2] = True
+        intersection = float((comp_mask & bbox_mask).sum())
+        if intersection > best_intersection:
+            best_intersection = intersection
+            best_label = comp_label
+
+    if best_intersection > 0:
+        result = np.zeros_like(semantic_mask, dtype=np.uint8)
+        result[labeled == best_label] = 1
+        return result
+
+    # Priority 3: highest bbox IoU
+    def _bbox_from_mask(mask: np.ndarray) -> tuple[int, int, int, int]:
+        ys, xs = np.where(mask)
+        return int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1
+
+    def _bbox_iou(
+        a: tuple[int, int, int, int],
+        b: tuple[int, int, int, int],
+    ) -> float:
+        ix1 = max(a[0], b[0])
+        iy1 = max(a[1], b[1])
+        ix2 = min(a[2], b[2])
+        iy2 = min(a[3], b[3])
+        inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+        area_a = (a[2] - a[0]) * (a[3] - a[1]) if a[2] > a[0] and a[3] > a[1] else 1
+        area_b = (b[2] - b[0]) * (b[3] - b[1]) if b[2] > b[0] and b[3] > b[1] else 1
+        union = area_a + area_b - inter
+        return inter / union if union > 0 else 0.0
+
+    prompt_bbox = (clamped_x1, clamped_y1, clamped_x2, clamped_y2)
+    best_label = 1
+    best_iou = -1.0
+
+    for comp_label in range(1, num_features + 1):
+        comp_mask = labeled == comp_label
+        comp_bbox = _bbox_from_mask(comp_mask)
+        iou = _bbox_iou(comp_bbox, prompt_bbox)
+        if iou > best_iou:
+            best_iou = iou
+            best_label = comp_label
+
+    result = np.zeros_like(semantic_mask, dtype=np.uint8)
+    result[labeled == best_label] = 1
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Dataset
 # ---------------------------------------------------------------------------
@@ -321,8 +545,30 @@ class MapSamDataset(Dataset):
                 f"image size ({orig_h}, {orig_w}) for {row['sample_id']}"
             )
 
+        # Select the prompted instance at ORIGINAL resolution, before any
+        # resize.  Mound symbols are ~459 px at source scale and shrink to
+        # ~79 px at 1024, so labelling a downsampled mask risks fragmenting
+        # or erasing thin symbols before the component is ever chosen.
+        semantic_mask_np = target_mask.squeeze(0).cpu().numpy()
+        instance_mask_np = select_instance_mask(
+            semantic_mask=semantic_mask_np,
+            center_point_xy=(
+                float(row["center_point"][0]),
+                float(row["center_point"][1]),
+            ),
+            bbox_xyxy=(
+                float(row["bbox"][0]),
+                float(row["bbox"][1]),
+                float(row["bbox"][2]),
+                float(row["bbox"][3]),
+            ),
+            sample_id=row["sample_id"],
+            labeled_components=label_mask_file(str(mask_path)),
+        )
+        instance_mask = torch.from_numpy(instance_mask_np).to(torch.float32).unsqueeze(0)
+
         image_r, target_r, ignore_r = resize_image_and_masks(
-            image, target_mask, ignore_mask, self.image_size
+            image, instance_mask, ignore_mask, self.image_size
         )
 
         box_prompt = scale_bbox(row["bbox"], orig_h, orig_w, self.image_size)

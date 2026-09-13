@@ -29,7 +29,10 @@ import torch
 from PIL import Image, ImageDraw, ImageFont
 from torch.utils.data import DataLoader
 
-from archeo_topia.datasets.mapsam_dataset import MapSamDataset
+from archeo_topia.datasets.mapsam_dataset import (
+    MapSamDataset,
+    count_connected_components,
+)
 from archeo_topia.datasets.mapsam_embedding_dataset import (
     MapSamEmbeddingDataset,
 )
@@ -101,6 +104,7 @@ def draw_overlay(
     gt_positive_pixels: int,
     pred_positive_pixels: int,
     pred_prob_max: float,
+    target_n_components: int = 1,
 ) -> Image.Image:
     """Create a composite overlay image for debugging.
 
@@ -123,6 +127,7 @@ def draw_overlay(
         gt_positive_pixels: Count of positive pixels in GT.
         pred_positive_pixels: Count of positive pixels in prediction.
         pred_prob_max: Maximum prediction probability.
+        target_n_components: Connected-component count of the target mask.
 
     Returns:
         PIL Image with the composite overlay.
@@ -153,7 +158,7 @@ def draw_overlay(
     # Panel 2: GT mask
     gt_arr = np.clip(target_mask_np * 255, 0, 255).astype(np.uint8)
     p2 = Image.fromarray(gt_arr, mode="L").convert("RGB")
-    panels.append((p2, "Ground truth mask"))
+    panels.append((p2, f"GT instance mask (n={target_n_components})"))
 
     # Panel 3: Pred mask
     pred_arr = np.clip(pred_mask_np * 255, 0, 255).astype(np.uint8)
@@ -356,6 +361,14 @@ def main(argv: list[str] | None = None) -> None:
         sample_ids = _get_sample_ids(batch)
         sid = sample_ids[0] if sample_ids else f"sample_{count}"
 
+        target_ncc = count_connected_components(target_np)
+        if target_ncc > 1:
+            logger.warning(
+                "Target mask has %d components for sample_id=%s (expected 1)",
+                target_ncc,
+                sid,
+            )
+
         stats = compute_prediction_stats(
             logits[:, 0:1], target_r, ignore_r, box_prompt, sample_ids
         )
@@ -376,6 +389,7 @@ def main(argv: list[str] | None = None) -> None:
             gt_positive_pixels=s.get("gt_positive_pixels", 0),
             pred_positive_pixels=s.get("pred_positive_pixels_threshold_0_5", 0),
             pred_prob_max=s.get("pred_probability_max", 0.0),
+            target_n_components=target_ncc,
         )
 
         out_path = output_dir / f"{sid}_overlay.png"

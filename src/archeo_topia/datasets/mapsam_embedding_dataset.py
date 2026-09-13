@@ -9,6 +9,7 @@ from ``training_samples.jsonl``.  Returns the embedding tensor instead
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -17,15 +18,47 @@ from torch.utils.data import Dataset
 
 from archeo_topia.datasets.mapsam_dataset import (
     _VALID_SPLITS,
-    load_binary_mask,
+    label_mask_file,
+    load_binary_mask_cached,
     load_jsonl,
-    resize_image_and_masks,
     scale_bbox,
     scale_point,
+    select_instance_mask,
     validate_sample_row,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@lru_cache(maxsize=32)
+def _load_embedding_cached(cache_file: str) -> dict[str, Any]:
+    """Load a cached SAM embedding payload, memoised by path.
+
+    Each sheet embedding is shared by every sample from that sheet, so the
+    uncached load re-read the same multi-megabyte tensor once per sample.
+
+    Args:
+        cache_file: Path to the ``.pt`` embedding payload.
+
+    Returns:
+        The payload dict.  Shared across callers, so treat it as read-only.
+    """
+    return torch.load(cache_file, map_location="cpu", weights_only=False)
+
+
+def _resize_mask(mask: torch.Tensor, size: int) -> torch.Tensor:
+    """Nearest-neighbour resize a ``(1, H, W)`` mask to ``(1, size, size)``.
+
+    Args:
+        mask: Mask tensor of shape ``(1, H, W)``.
+        size: Target square dimension.
+
+    Returns:
+        Resized mask tensor of shape ``(1, size, size)``.
+    """
+    return torch.nn.functional.interpolate(
+        mask.unsqueeze(0), size=(size, size), mode="nearest"
+    ).squeeze(0)
 
 
 class MapSamEmbeddingDataset(Dataset):
@@ -58,9 +91,7 @@ class MapSamEmbeddingDataset(Dataset):
         self.return_original_size = return_original_size
 
         if split not in _VALID_SPLITS:
-            raise ValueError(
-                f"Invalid split '{split}'. Must be one of {sorted(_VALID_SPLITS)}"
-            )
+            raise ValueError(f"Invalid split '{split}'. Must be one of {sorted(_VALID_SPLITS)}")
 
         all_rows = load_jsonl(self.samples_path)
         self._samples: list[dict[str, Any]] = [
@@ -71,8 +102,7 @@ class MapSamEmbeddingDataset(Dataset):
             raise ValueError(f"No samples found for split '{split}'")
 
         logger.info(
-            "MapSamEmbeddingDataset: loaded %d samples for split '%s' "
-            "(embeddings from %s/%s/%s)",
+            "MapSamEmbeddingDataset: loaded %d samples for split '%s' (embeddings from %s/%s/%s)",
             len(self._samples),
             split,
             model_type,
@@ -90,37 +120,47 @@ class MapSamEmbeddingDataset(Dataset):
         image_rel = row["image_path"]
         stem = Path(image_rel).stem
         cache_file = (
-            self.dataset_root
-            / "sam_embeddings"
-            / self.model_type
-            / self.split
-            / f"{stem}.pt"
+            self.dataset_root / "sam_embeddings" / self.model_type / self.split / f"{stem}.pt"
         )
 
         if not cache_file.exists():
-            raise FileNotFoundError(
-                f"Cached embedding not found for {image_rel}: {cache_file}"
-            )
+            raise FileNotFoundError(f"Cached embedding not found for {image_rel}: {cache_file}")
 
-        payload = torch.load(str(cache_file), map_location="cpu", weights_only=False)
+        payload = _load_embedding_cached(str(cache_file))
         image_embedding = payload["image_embedding"]
         original_size = payload["original_size"]
         orig_h, orig_w = original_size
 
         mask_path = self.dataset_root / row["mask_path"]
-        ignore_mask_path = self.dataset_root / row.get(
-            "ignore_mask_path", row["mask_path"]
+        ignore_mask_path = self.dataset_root / row.get("ignore_mask_path", row["mask_path"])
+
+        ignore_mask = load_binary_mask_cached(str(ignore_mask_path))
+
+        # Select the prompted instance at ORIGINAL resolution, before any
+        # resize, for the same reason as in MapSamDataset: downsampling a
+        # ~459 px mound symbol before labelling can fragment or erase it.
+        # Foreground is derived from the cached label array, so the sheet
+        # mask itself never has to be decoded here.
+        labeled_components = label_mask_file(str(mask_path))
+        instance_mask_np = select_instance_mask(
+            semantic_mask=labeled_components[0] > 0,
+            center_point_xy=(
+                float(row["center_point"][0]),
+                float(row["center_point"][1]),
+            ),
+            bbox_xyxy=(
+                float(row["bbox"][0]),
+                float(row["bbox"][1]),
+                float(row["bbox"][2]),
+                float(row["bbox"][3]),
+            ),
+            sample_id=row["sample_id"],
+            labeled_components=labeled_components,
         )
+        instance_mask = torch.from_numpy(instance_mask_np).to(torch.float32).unsqueeze(0)
 
-        target_mask = load_binary_mask(mask_path)
-        ignore_mask = load_binary_mask(ignore_mask_path)
-
-        target_r, ignore_r = resize_image_and_masks(
-            torch.zeros(3, orig_h, orig_w),
-            target_mask,
-            ignore_mask,
-            self.image_size,
-        )[1:]
+        target_r = _resize_mask(instance_mask, self.image_size)
+        ignore_r = _resize_mask(ignore_mask, self.image_size)
 
         box_prompt = scale_bbox(row["bbox"], orig_h, orig_w, self.image_size)
         point_prompt = scale_point(row["center_point"], orig_h, orig_w, self.image_size)
