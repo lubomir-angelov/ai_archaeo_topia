@@ -290,7 +290,21 @@ def main(argv: list[str] | None = None) -> None:
 
     logger.info("Checkpoint loaded from epoch %d", ckpt.get("epoch", "?"))
 
+    # Follow the run's own dataset configuration.  A windowed checkpoint
+    # evaluated on full tiles would be scored on inputs it never saw, and a
+    # fold's evaluation sheet is named by eval_sheets rather than by split.
+    window_px = dataset_cfg.get("window_px")
+    eval_sheets = dataset_cfg.get("eval_sheets")
+
     use_cached = args.use_cached_embeddings
+    if use_cached and window_px is not None:
+        logger.error(
+            "This run uses a %d px input window, which the per-tile embedding "
+            "cache cannot serve. Drop --use-cached-embeddings.",
+            window_px,
+        )
+        sys.exit(1)
+
     if use_cached:
         ds = MapSamEmbeddingDataset(
             dataset_root=str(dataset_root),
@@ -298,6 +312,7 @@ def main(argv: list[str] | None = None) -> None:
             split=args.split,
             image_size=dataset_cfg["image_size"],
             model_type=model_type,
+            sheets=eval_sheets,
         )
     else:
         ds = MapSamDataset(
@@ -305,6 +320,8 @@ def main(argv: list[str] | None = None) -> None:
             samples_path=str(samples_path),
             split=args.split,
             image_size=dataset_cfg["image_size"],
+            sheets=eval_sheets,
+            window_px=window_px,
         )
 
     loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0)
