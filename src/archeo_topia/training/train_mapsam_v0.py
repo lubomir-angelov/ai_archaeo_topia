@@ -113,6 +113,7 @@ def resolve_config(cfg: dict[str, Any]) -> dict[str, Any]:
     outputs_cfg = result.get("outputs", {})
     outputs_cfg.setdefault("save_debug_predictions", True)
     outputs_cfg.setdefault("debug_prediction_count", 8)
+    outputs_cfg.setdefault("save_last_checkpoint", True)
     result["outputs"] = outputs_cfg
 
     debug_cfg = result.get("debug", {})
@@ -1008,8 +1009,14 @@ def save_checkpoint(
     train_loss: float,
     val_loss: float,
     config: dict[str, Any],
+    include_optimizer: bool = False,
 ) -> None:
     """Save a training checkpoint.
+
+    Archival checkpoints (``best.pt``, ``epoch_N.pt``, ``final.pt``) hold only
+    the trained weights.  AdamW state is roughly twice the size of the weights
+    it tracks and is only useful for resuming, so it is written to the single
+    rolling ``last.pt`` instead of to every file.
 
     Args:
         path: Destination file path.
@@ -1021,6 +1028,8 @@ def save_checkpoint(
         train_loss: Latest training loss.
         val_loss: Latest validation loss.
         config: Resolved configuration dictionary.
+        include_optimizer: Store optimizer state so training can resume
+            exactly. Set only for the rolling ``last.pt``.
     """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -1034,29 +1043,32 @@ def save_checkpoint(
     full_state = sam.state_dict()
     partial_state = {k: v for k, v in full_state.items() if k in trainable_names}
 
+    payload: dict[str, Any] = {
+        "epoch": epoch,
+        "model_type": model_type,
+        "sam_checkpoint": sam_checkpoint,
+        "state_dict_scope": "trainable",
+        "model_state_dict": partial_state,
+        "train_loss": train_loss,
+        "val_loss": val_loss,
+        "config": config,
+        "has_optimizer_state": include_optimizer,
+    }
+    if include_optimizer:
+        payload["optimizer_state_dict"] = optimizer.state_dict()
+
     logger.info(
-        "Saving checkpoint: %d/%d tensors (%.1f MB of %.1f MB); frozen weights come from %s",
+        "Saving %s: %d/%d tensors (%.1f MB of %.1f MB)%s; frozen weights come from %s",
+        Path(path).name,
         len(partial_state),
         len(full_state),
         _state_dict_bytes(partial_state) / 1048576,
         _state_dict_bytes(full_state) / 1048576,
+        " + optimizer state" if include_optimizer else "",
         sam_checkpoint,
     )
 
-    torch.save(
-        {
-            "epoch": epoch,
-            "model_type": model_type,
-            "sam_checkpoint": sam_checkpoint,
-            "state_dict_scope": "trainable",
-            "model_state_dict": partial_state,
-            "optimizer_state_dict": optimizer.state_dict(),
-            "train_loss": train_loss,
-            "val_loss": val_loss,
-            "config": config,
-        },
-        str(path),
-    )
+    torch.save(payload, str(path))
 
 
 def _state_dict_bytes(state: dict[str, torch.Tensor]) -> int:
@@ -1124,6 +1136,13 @@ def load_checkpoint(
         logger.info("Loaded full state dict (legacy checkpoint) from %s", path)
 
     if optimizer is not None:
+        if "optimizer_state_dict" not in ckpt:
+            raise ValueError(
+                f"Checkpoint {path} carries no optimizer state, so training cannot resume "
+                f"from it exactly. Archival checkpoints store weights only; resume from the "
+                f"rolling 'last.pt' in the same directory, or pass optimizer=None to load "
+                f"the weights for inference or a fresh fine-tune."
+            )
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
     return ckpt
 
@@ -1312,6 +1331,7 @@ def main(argv: list[str] | None = None) -> None:
     max_train = training_cfg.get("max_train_batches")
     max_val = training_cfg.get("max_val_batches")
     save_every = training_cfg.get("save_every_epochs", 5)
+    save_last = outputs_cfg.get("save_last_checkpoint", True)
     val_every = training_cfg.get("validate_every_epochs", 1)
 
     logger.info(
@@ -1431,6 +1451,23 @@ def main(argv: list[str] | None = None) -> None:
                 cfg,
             )
 
+            # Refresh the single rolling resume point.  This is the only file
+            # that carries optimizer state, so an interrupted run loses at
+            # most save_every_epochs epochs rather than the whole run.
+            if save_last:
+                save_checkpoint(
+                    checkpoints_dir / "last.pt",
+                    sam,
+                    optimizer,
+                    epoch,
+                    model_cfg["model_type"],
+                    str(sam_ckpt),
+                    train_metrics["loss"],
+                    val_metrics["loss"] if val_metrics else float("inf"),
+                    cfg,
+                    include_optimizer=True,
+                )
+
         record = {
             "epoch": epoch,
             "train": {k: v for k, v in train_metrics.items() if k != "prediction_stats"},
@@ -1461,6 +1498,20 @@ def main(argv: list[str] | None = None) -> None:
         val_metrics["loss"] if val_metrics else float("inf"),
         cfg,
     )
+
+    if save_last:
+        save_checkpoint(
+            checkpoints_dir / "last.pt",
+            sam,
+            optimizer,
+            epochs,
+            model_cfg["model_type"],
+            str(sam_ckpt),
+            train_metrics["loss"],
+            val_metrics["loss"] if val_metrics else float("inf"),
+            cfg,
+            include_optimizer=True,
+        )
 
     final_record = {
         "epochs": epochs,

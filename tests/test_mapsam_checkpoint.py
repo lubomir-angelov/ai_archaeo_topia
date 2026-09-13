@@ -153,7 +153,8 @@ class TestPartialLoad:
         with pytest.raises(ValueError, match="absent from this model"):
             load_checkpoint(p, TinyModel())
 
-    def test_optimizer_state_round_trips(self, tmp_path: Path) -> None:
+    def test_optimizer_state_round_trips_when_included(self, tmp_path: Path) -> None:
+        """The rolling last.pt carries optimizer state so a run can resume."""
         m = TinyModel()
         m.freeze_encoder()
         trainable = [p for p in m.parameters() if p.requires_grad]
@@ -161,11 +162,75 @@ class TestPartialLoad:
         sum(p.sum() for p in trainable).backward()
         opt.step()
 
-        p = tmp_path / "ck.pt"
-        save_checkpoint(p, m, opt, 1, "tiny", "base.pth", 0.1, 0.1, {})
+        p = tmp_path / "last.pt"
+        save_checkpoint(p, m, opt, 1, "tiny", "base.pth", 0.1, 0.1, {}, include_optimizer=True)
 
         dst = TinyModel()
         dst.freeze_encoder()
         dst_opt = torch.optim.AdamW([q for q in dst.parameters() if q.requires_grad], lr=1e-3)
         load_checkpoint(p, dst, dst_opt)
-        assert len(dst_opt.state_dict()["state"]) == len(opt.state_dict()["state"])
+
+        restored = dst_opt.state_dict()["state"]
+        assert len(restored) == len(opt.state_dict()["state"])
+        assert all(v["step"] == 1 for v in restored.values())
+
+
+class TestOptimizerStateSplit:
+    """Archival checkpoints are lean; only the rolling last.pt can resume."""
+
+    def test_archival_checkpoint_omits_optimizer(self, tmp_path: Path) -> None:
+        m = TinyModel()
+        m.freeze_encoder()
+        p = tmp_path / "epoch_1.pt"
+        _save(p, m)
+        ck = torch.load(str(p), map_location="cpu", weights_only=False)
+        assert "optimizer_state_dict" not in ck
+        assert ck["has_optimizer_state"] is False
+
+    def test_last_checkpoint_includes_optimizer(self, tmp_path: Path) -> None:
+        m = TinyModel()
+        m.freeze_encoder()
+        opt = torch.optim.AdamW([q for q in m.parameters() if q.requires_grad], lr=1e-3)
+        p = tmp_path / "last.pt"
+        save_checkpoint(p, m, opt, 1, "tiny", "base.pth", 0.1, 0.1, {}, include_optimizer=True)
+        ck = torch.load(str(p), map_location="cpu", weights_only=False)
+        assert "optimizer_state_dict" in ck
+        assert ck["has_optimizer_state"] is True
+
+    def test_archival_is_smaller_than_last(self, tmp_path: Path) -> None:
+        m = TinyModel()
+        m.freeze_encoder()
+        trainable = [q for q in m.parameters() if q.requires_grad]
+        opt = torch.optim.AdamW(trainable, lr=1e-3)
+        sum(q.sum() for q in trainable).backward()
+        opt.step()
+
+        lean, last = tmp_path / "epoch_1.pt", tmp_path / "last.pt"
+        save_checkpoint(lean, m, opt, 1, "tiny", "base.pth", 0.1, 0.1, {})
+        save_checkpoint(last, m, opt, 1, "tiny", "base.pth", 0.1, 0.1, {}, include_optimizer=True)
+        assert lean.stat().st_size < last.stat().st_size
+
+    def test_resuming_from_archival_fails_with_guidance(self, tmp_path: Path) -> None:
+        m = TinyModel()
+        m.freeze_encoder()
+        p = tmp_path / "epoch_1.pt"
+        _save(p, m)
+
+        dst = TinyModel()
+        dst.freeze_encoder()
+        dst_opt = torch.optim.AdamW([q for q in dst.parameters() if q.requires_grad], lr=1e-3)
+        with pytest.raises(ValueError, match="last.pt"):
+            load_checkpoint(p, dst, dst_opt)
+
+    def test_archival_still_loads_for_inference(self, tmp_path: Path) -> None:
+        m = TinyModel()
+        m.freeze_encoder()
+        with torch.no_grad():
+            m.mask_decoder.weight.fill_(0.75)
+        p = tmp_path / "epoch_1.pt"
+        _save(p, m)
+
+        dst = TinyModel()
+        dst.freeze_encoder()
+        load_checkpoint(p, dst, None)
+        assert torch.equal(dst.mask_decoder.weight, m.mask_decoder.weight)
