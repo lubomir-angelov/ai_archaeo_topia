@@ -1,0 +1,22 @@
+{
+  "arm": "foldB_window512",
+  "config": "configs/mapsam/mapsam_v0_4_loso512_foldB_pw20.yaml",
+  "checkpoint": "artifacts/models/mapsam/v0_4_loso512_foldB_pw20/checkpoints/final.pt",
+  "split": "test",
+  "window_px": 512,
+  "jitter_prompts": true,
+  "by_offset": [
+    {
+      "arm": "foldB_window512",
+      "offset_px": 0,
+      "n_directions": 1,
+      "mean_abs_error_source_px": 91.76470588235294,
+      "mean_gt_area_source_px": 470.3529411764706,
+      "mean_iou": 0.8261454117647059,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 91.76470588235294
+    }
+  ]
+}

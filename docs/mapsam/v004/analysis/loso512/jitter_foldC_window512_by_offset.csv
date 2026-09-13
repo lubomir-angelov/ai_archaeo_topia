@@ -1,0 +1,2 @@
+arm,offset_px,n_directions,mean_abs_error_source_px,mean_gt_area_source_px,mean_iou,iou_ge_0_5_rate,zero_iou_rate,zero_prediction_rate,worst_direction_abs_error_source_px
+foldC_window512,0,1,103.05882352941177,381.1764705882353,0.7573742941176471,1.0,0.0,0.0,103.05882352941177

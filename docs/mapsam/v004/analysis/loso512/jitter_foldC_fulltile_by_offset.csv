@@ -1,0 +1,2 @@
+arm,offset_px,n_directions,mean_abs_error_source_px,mean_gt_area_source_px,mean_iou,iou_ge_0_5_rate,zero_iou_rate,zero_prediction_rate,worst_direction_abs_error_source_px
+foldC_fulltile,0,1,324.5176470588235,370.7647058823529,0.3714231176470588,0.29411764705882354,0.11764705882352941,0.0,324.5176470588235

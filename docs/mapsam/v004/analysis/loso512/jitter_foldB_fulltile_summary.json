@@ -1,0 +1,22 @@
+{
+  "arm": "foldB_fulltile",
+  "config": "configs/mapsam/mapsam_v0_3_loso_foldB_pw20_cropon.yaml",
+  "checkpoint": "artifacts/models/mapsam/v0_3_loso_foldB_pw20_cropon/checkpoints/final.pt",
+  "split": "test",
+  "window_px": null,
+  "jitter_prompts": true,
+  "by_offset": [
+    {
+      "arm": "foldB_fulltile",
+      "offset_px": 0,
+      "n_directions": 1,
+      "mean_abs_error_source_px": 253.90588235294115,
+      "mean_gt_area_source_px": 479.0470588235294,
+      "mean_iou": 0.6020657352941177,
+      "iou_ge_0_5_rate": 0.7058823529411765,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 253.90588235294115
+    }
+  ]
+}

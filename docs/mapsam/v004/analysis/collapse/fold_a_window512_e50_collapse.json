@@ -1,0 +1,16 @@
+{
+  "config": "configs/mapsam/mapsam_v0_4_loso512_foldA_pw20.yaml",
+  "checkpoint": "artifacts/models/mapsam/v0_4_loso512_foldA_pw20/checkpoints/final.pt",
+  "window_px": 512,
+  "summary": {
+    "n": 120,
+    "near_threshold_px": 40.0,
+    "mean_iou": 0.79302,
+    "n_zero_iou": 0,
+    "n_zero_prediction": 0,
+    "n_near_miss": 0,
+    "n_wrong_object": 0,
+    "median_near_miss_distance_source_px": null,
+    "median_hit_centroid_distance_source_px": 0.985
+  }
+}
