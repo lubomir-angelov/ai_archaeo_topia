@@ -381,7 +381,13 @@ def main(argv: list[str] | None = None) -> None:
             )
 
         stats = compute_prediction_stats(
-            logits[:, 0:1], target_r, ignore_r, box_prompt, sample_ids
+            logits[:, 0:1],
+            target_r,
+            ignore_r,
+            box_prompt,
+            sample_ids,
+            window_xyxy=batch.get("window_xyxy"),
+            sheet_ids=batch.get("sheet_id"),
         )
         all_stats.extend(stats)
 

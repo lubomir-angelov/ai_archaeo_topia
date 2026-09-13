@@ -72,6 +72,7 @@ def check_sam_setup(model_type: str, checkpoint_path: str) -> bool:
     # -- Detect device --
     try:
         import torch
+
         cuda_available = torch.cuda.is_available()
     except ImportError as exc:
         log.error("Failed to import torch: %s", exc)

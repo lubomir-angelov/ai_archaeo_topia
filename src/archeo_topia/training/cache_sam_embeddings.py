@@ -148,9 +148,7 @@ def main(argv: list[str] | None = None) -> None:
 
     dataset_root = Path(dataset_cfg["root"])
     samples_rel = Path(dataset_cfg["samples"])
-    samples_path = (
-        dataset_root / samples_rel if not samples_rel.is_absolute() else samples_rel
-    )
+    samples_path = dataset_root / samples_rel if not samples_rel.is_absolute() else samples_rel
     model_type = model_cfg["model_type"]
     sam_checkpoint = Path(model_cfg["sam_checkpoint"])
 
@@ -221,9 +219,7 @@ def main(argv: list[str] | None = None) -> None:
             logger.error("Failed to cache %s: %s", img_path, exc)
             failed += 1
 
-    logger.info(
-        "Done — cached: %d, skipped: %d, failed: %d", cached, skipped, failed
-    )
+    logger.info("Done — cached: %d, skipped: %d, failed: %d", cached, skipped, failed)
 
 
 if __name__ == "__main__":

@@ -486,8 +486,17 @@ def compute_prediction_stats(
     box_prompt: torch.Tensor,
     sample_ids: list[str],
     threshold: float = 0.5,
+    window_xyxy: torch.Tensor | None = None,
+    sheet_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Compute per-sample prediction statistics.
+
+    Areas and errors are reported twice: once on the decoder's own grid, and
+    once converted to source-tile pixels via *window_xyxy*.  The decoder-space
+    numbers are not comparable between runs that use different input windows,
+    because a prompt-centred window magnifies the target and the same absolute
+    error then scores a much better IoU.  The ``_source_px`` figures put every
+    run back on the tile's own grid.
 
     Args:
         logits: Raw logits ``(B, 1, H, W)``.
@@ -496,6 +505,10 @@ def compute_prediction_stats(
         box_prompt: Bounding boxes ``(B, 4)`` in xyxy.
         sample_ids: List of sample IDs for each batch element.
         threshold: Threshold for binarizing predictions.
+        window_xyxy: Input windows ``(B, 4)`` in source-tile pixels.  When
+            omitted, source-pixel conversions are skipped.
+        sheet_ids: Map sheet ID per batch element, carried through so
+            per-sample artifacts can be grouped by sheet without re-parsing.
 
     Returns:
         List of per-sample statistic dictionaries.
@@ -531,6 +544,46 @@ def compute_prediction_stats(
         iou = intersection / (union - intersection + 1e-6) if union > 0 else 0.0
         dice = 2 * intersection / (union + 1e-6) if union > 0 else 0.0
 
+        # Absolute disagreement, in mask pixels.  Unlike IoU this does not
+        # shrink just because the target got bigger, so it separates "the
+        # model improved" from "the denominator grew".
+        symmetric_difference = gt_pos + pred_pos - 2 * intersection
+
+        # Saturation diagnostics.  A probability of 1.0 in float32 is reached
+        # for any logit above about 16, and rounding hides the rest, so the
+        # logits themselves are what carry the information.
+        lg = logits[b, 0]
+        target_bool = t > 0.5
+        pred_bool = p > 0.5
+        entry_extra: dict[str, Any] = {
+            "logit_min": round(lg.min().item(), 4),
+            "logit_max": round(lg.max().item(), 4),
+            "prob_mean_in_gt": round(pr[target_bool].mean().item(), 6)
+            if target_bool.any()
+            else 0.0,
+            "prob_mean_in_pred": round(pr[pred_bool].mean().item(), 6) if pred_bool.any() else 0.0,
+            "prob_mean_in_background": round(pr[~target_bool].mean().item(), 8)
+            if (~target_bool).any()
+            else 0.0,
+            "abs_error_px": round(symmetric_difference, 2),
+        }
+
+        if window_xyxy is not None:
+            wx0, wy0, wx1, wy1 = window_xyxy[b].tolist()
+            # Square windows, so either side gives the same factor; averaging
+            # keeps the full-tile case (a non-square tile) honest.
+            window_side = ((wx1 - wx0) + (wy1 - wy0)) / 2.0
+            source_area_per_mask_px = (window_side / logits.shape[2]) ** 2
+            entry_extra["window_side_px"] = round(window_side, 1)
+            entry_extra["source_px_per_mask_px"] = round(source_area_per_mask_px, 3)
+            entry_extra["gt_area_source_px"] = round(gt_pos * source_area_per_mask_px, 1)
+            entry_extra["abs_error_source_px"] = round(
+                symmetric_difference * source_area_per_mask_px, 1
+            )
+
+        if sheet_ids is not None and b < len(sheet_ids):
+            entry_extra["sheet_id"] = sheet_ids[b]
+
         stats_list.append(
             {
                 "sample_id": sample_ids[b] if b < len(sample_ids) else f"batch_{b}",
@@ -545,6 +598,7 @@ def compute_prediction_stats(
                 "target_area_ratio": round(target_area_ratio, 6),
                 "prediction_area_ratio": round(prediction_area_ratio, 6),
                 "valid_pixels": int(valid_count),
+                **entry_extra,
             }
         )
 
@@ -891,7 +945,13 @@ def train_epoch(
         if log_stats:
             sample_ids = _get_sample_ids(batch)
             stats = compute_prediction_stats(
-                logits[:, 0:1], target_r, ignore_r, box_prompt, sample_ids
+                logits[:, 0:1],
+                target_r,
+                ignore_r,
+                box_prompt,
+                sample_ids,
+                window_xyxy=batch.get("window_xyxy"),
+                sheet_ids=batch.get("sheet_id"),
             )
             all_stats.extend(stats)
 
@@ -979,7 +1039,13 @@ def validate(
         if log_stats:
             sample_ids = _get_sample_ids(batch)
             stats = compute_prediction_stats(
-                logits[:, 0:1], target_r, ignore_r, box_prompt, sample_ids
+                logits[:, 0:1],
+                target_r,
+                ignore_r,
+                box_prompt,
+                sample_ids,
+                window_xyxy=batch.get("window_xyxy"),
+                sheet_ids=batch.get("sheet_id"),
             )
             all_stats.extend(stats)
 
