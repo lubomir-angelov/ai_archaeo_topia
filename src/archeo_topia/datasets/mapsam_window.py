@@ -208,3 +208,58 @@ def source_pixels_per_mask_pixel(window: Window, mask_size: int) -> float:
     if mask_size < 1:
         raise ValueError(f"mask_size must be positive, got {mask_size}")
     return (window.size / mask_size) ** 2
+
+
+def apply_prompt_jitter(
+    center_xy: tuple[float, float],
+    bbox_xyxy: tuple[float, float, float, float],
+    image_hw: tuple[int, int],
+    jitter_xy: tuple[float, float] | None,
+    jitter_prompts: bool = True,
+) -> tuple[tuple[float, float], tuple[float, float], tuple[float, float, float, float]]:
+    """Displace a ground-truth-derived prompt by a fixed offset.
+
+    Every MapSAM number up to v0.3 was measured with the prompt derived from
+    the annotation, so it answers "given the correct mound location, can the
+    mound be segmented".  A detector will not localize that exactly, and with
+    a prompt-centred window the localization error is not only a worse prompt
+    but a *displaced input*: 100 px is 4% of a 2400 px tile and 20% of a
+    512 px window.  This offsets the prompt so that gap can be measured.
+
+    Coordinates are clamped to the image, because a detector proposal outside
+    the tile is not a case worth modelling and SAM's prompt encoder expects
+    in-bounds coordinates.  Clamping keeps the box at least one pixel wide.
+
+    Args:
+        center_xy: Ground-truth prompt point ``(x, y)``.
+        bbox_xyxy: Ground-truth prompt box ``(x1, y1, x2, y2)``.
+        image_hw: Image ``(height, width)`` in pixels.
+        jitter_xy: Offset ``(dx, dy)`` in original-image pixels, or ``None``
+            for no jitter.
+        jitter_prompts: When ``True`` the point and box move with the window.
+            When ``False`` only the window centre moves, which isolates the
+            cost of a displaced input from the cost of a wrong prompt.
+
+    Returns:
+        Tuple of ``(window_center, prompt_center, prompt_bbox)``.
+    """
+    if jitter_xy is None:
+        return center_xy, center_xy, bbox_xyxy
+
+    height, width = image_hw
+    dx, dy = jitter_xy
+
+    def _clamp(x: float, y: float) -> tuple[float, float]:
+        return (
+            min(max(x, 0.0), float(width - 1)),
+            min(max(y, 0.0), float(height - 1)),
+        )
+
+    window_center = _clamp(center_xy[0] + dx, center_xy[1] + dy)
+    if not jitter_prompts:
+        return window_center, center_xy, bbox_xyxy
+
+    x1, y1 = _clamp(bbox_xyxy[0] + dx, bbox_xyxy[1] + dy)
+    x2, y2 = _clamp(bbox_xyxy[2] + dx, bbox_xyxy[3] + dy)
+    prompt_bbox = (x1, y1, max(x2, x1 + 1.0), max(y2, y1 + 1.0))
+    return window_center, window_center, prompt_bbox

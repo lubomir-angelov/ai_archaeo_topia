@@ -22,6 +22,7 @@ from torch.utils.data import Dataset
 
 from archeo_topia.datasets.mapsam_window import (
     Window,
+    apply_prompt_jitter,
     bbox_into_window,
     compute_window,
     crop_to_window,
@@ -563,6 +564,19 @@ class MapSamDataset(Dataset):
         seed: Seed for the *subsample* draw.
         window_px: Side length of a prompt-centred input window in original
             image pixels, or ``None`` to feed the whole tile as v0.2 did.
+        prompt_jitter_xy: Offset ``(dx, dy)`` in original-image pixels applied
+            to the prompt after the target instance has been selected, or
+            ``None`` for ground-truth-derived prompts.  Every v0.1-v0.3 number
+            uses a prompt derived from the annotation itself; a real detector
+            will not localize that exactly, and a prompt-centred window turns
+            localization error into *input* error because the window moves
+            with the prompt.  The target mask is never jittered: the question
+            is how well the same mound is segmented from a displaced prompt.
+        jitter_prompts: When ``True`` (the default) the jitter displaces the
+            window, the point and the box together, which models a detector
+            whose box is the right size in the wrong place.  When ``False``
+            only the window moves and SAM still receives the ground-truth
+            prompt, which isolates window displacement from prompt error.
 
     Raises:
         FileNotFoundError: If *dataset_root* or *samples_path* does not exist.
@@ -580,6 +594,8 @@ class MapSamDataset(Dataset):
         subsample: int | None = None,
         seed: int = 42,
         window_px: int | None = None,
+        prompt_jitter_xy: tuple[float, float] | None = None,
+        jitter_prompts: bool = True,
     ) -> None:
         self.dataset_root = Path(dataset_root)
         self.samples_path = Path(samples_path)
@@ -587,6 +603,8 @@ class MapSamDataset(Dataset):
         self.image_size = image_size
         self.return_original_size = return_original_size
         self.window_px = window_px
+        self.prompt_jitter_xy = prompt_jitter_xy
+        self.jitter_prompts = jitter_prompts
 
         if not self.dataset_root.exists():
             raise FileNotFoundError(f"Dataset root does not exist: {self.dataset_root}")
@@ -661,6 +679,17 @@ class MapSamDataset(Dataset):
         )
         instance_mask = torch.from_numpy(instance_mask_np).to(torch.float32).unsqueeze(0)
 
+        # Jitter is applied after instance selection for the same reason
+        # windowing is: the target stays the mound the annotation points at,
+        # even when the prompt no longer does.
+        window_center, prompt_center, prompt_bbox = apply_prompt_jitter(
+            center_xy=(float(row["center_point"][0]), float(row["center_point"][1])),
+            bbox_xyxy=tuple(float(v) for v in row["bbox"]),  # type: ignore[arg-type]
+            image_hw=(orig_h, orig_w),
+            jitter_xy=self.prompt_jitter_xy,
+            jitter_prompts=self.jitter_prompts,
+        )
+
         # Windowing happens after instance selection, so the single-instance
         # guarantee survives it: a 1024 px window on a sheet with 120 mounds
         # will often contain a neighbour, but the neighbour was already
@@ -668,7 +697,7 @@ class MapSamDataset(Dataset):
         window: Window | None = None
         if self.window_px is not None:
             window = compute_window(
-                center_xy=(float(row["center_point"][0]), float(row["center_point"][1])),
+                center_xy=window_center,
                 image_hw=(orig_h, orig_w),
                 window_px=self.window_px,
             )
@@ -681,11 +710,11 @@ class MapSamDataset(Dataset):
         )
 
         if window is not None:
-            box_prompt = bbox_into_window(row["bbox"], window, self.image_size)
-            point_prompt = point_into_window(row["center_point"], window, self.image_size)
+            box_prompt = bbox_into_window(prompt_bbox, window, self.image_size)
+            point_prompt = point_into_window(prompt_center, window, self.image_size)
         else:
-            box_prompt = scale_bbox(row["bbox"], orig_h, orig_w, self.image_size)
-            point_prompt = scale_point(row["center_point"], orig_h, orig_w, self.image_size)
+            box_prompt = scale_bbox(list(prompt_bbox), orig_h, orig_w, self.image_size)
+            point_prompt = scale_point(list(prompt_center), orig_h, orig_w, self.image_size)
         point_label = torch.tensor([1], dtype=torch.int64)
 
         result: dict[str, Any] = {

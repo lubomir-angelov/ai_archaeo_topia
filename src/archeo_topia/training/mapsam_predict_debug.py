@@ -63,6 +63,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True, help="Output directory for overlays")
     parser.add_argument("--max-samples", type=int, default=16, help="Maximum samples to process")
     parser.add_argument(
+        "--sample-ids",
+        default=None,
+        help=(
+            "Restrict overlays to these sample IDs: a comma-separated list, or a path "
+            "to a file holding one ID per line. Without it the split is walked in "
+            "manifest order, which cannot target a specific set of failures."
+        ),
+    )
+    parser.add_argument(
         "--use-cached-embeddings",
         action="store_true",
         help="Use pre-computed image embeddings from cache",
@@ -324,13 +333,24 @@ def main(argv: list[str] | None = None) -> None:
             window_px=window_px,
         )
 
+    wanted_ids = _resolve_sample_ids(args.sample_ids)
+    if wanted_ids is not None:
+        logger.info("Restricting to %d requested sample IDs", len(wanted_ids))
+
     loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0)
 
     all_stats: list[dict[str, Any]] = []
     count = 0
+    seen_ids: set[str] = set()
     for batch in loader:
         if count >= args.max_samples:
             break
+
+        if wanted_ids is not None:
+            batch_ids = _get_sample_ids(batch)
+            if not batch_ids or batch_ids[0] not in wanted_ids:
+                continue
+            seen_ids.add(batch_ids[0])
 
         with torch.no_grad():
             if use_cached:
@@ -434,6 +454,15 @@ def main(argv: list[str] | None = None) -> None:
 
         count += 1
 
+    if wanted_ids is not None:
+        missing = sorted(wanted_ids - seen_ids)
+        if missing:
+            logger.warning(
+                "%d requested sample ID(s) were not found in this split: %s",
+                len(missing),
+                ", ".join(missing[:10]),
+            )
+
     stats_path = output_dir / f"prediction_stats_{args.split}.jsonl"
     with open(stats_path, "w") as f:
         for entry in all_stats:
@@ -463,6 +492,33 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     logger.info("Done. Saved %d overlays to %s", count, output_dir)
+
+
+def _resolve_sample_ids(spec: str | None) -> set[str] | None:
+    """Read a sample-ID selection from a comma-separated list or a file.
+
+    Args:
+        spec: The ``--sample-ids`` value, or ``None``.
+
+    Returns:
+        The requested IDs, or ``None`` when no selection was given.
+
+    Raises:
+        ValueError: If *spec* is given but names no IDs.
+    """
+    if spec is None:
+        return None
+
+    path = Path(spec)
+    if path.exists():
+        raw = [line.strip() for line in path.read_text().splitlines()]
+    else:
+        raw = [part.strip() for part in spec.split(",")]
+
+    ids = {value for value in raw if value}
+    if not ids:
+        raise ValueError(f"--sample-ids resolved to an empty selection: {spec!r}")
+    return ids
 
 
 def _get_sample_ids(batch: dict[str, Any]) -> list[str]:
