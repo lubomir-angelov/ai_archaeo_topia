@@ -80,6 +80,11 @@ def resolve_config(cfg: dict[str, Any]) -> dict[str, Any]:
     samples = ds.get("samples", "")
     if not Path(samples).is_absolute():
         ds["samples"] = str(Path(root) / samples)
+    # Leave-one-sheet-out selection.  When these are unset the datasets filter
+    # on split exactly as v0.1 and v0.2 did.
+    ds.setdefault("train_sheets", None)
+    ds.setdefault("eval_sheets", None)
+    ds.setdefault("train_subsample", None)
     result["dataset"] = ds
 
     mdl = result.get("model", {})
@@ -1354,6 +1359,19 @@ def main(argv: list[str] | None = None) -> None:
         logger.warning("  Samples: %d, Repeats: %d", overfit_count, overfit_repeat)
         logger.warning("=" * 60)
 
+    val_split = dataset_cfg.get("val_split", "val")
+    train_sheets = dataset_cfg.get("train_sheets")
+    eval_sheets = dataset_cfg.get("eval_sheets")
+    if train_sheets or eval_sheets:
+        if not (train_sheets and eval_sheets):
+            logger.error("dataset.train_sheets and dataset.eval_sheets must be set together")
+            sys.exit(1)
+        overlap = sorted(set(train_sheets) & set(eval_sheets))
+        if overlap:
+            logger.error("Sheet(s) in both train and eval — this leaks: %s", overlap)
+            sys.exit(1)
+        logger.info("Leave-one-sheet-out: train %s, eval %s", train_sheets, eval_sheets)
+
     use_cached = args.use_cached_embeddings or model_cfg.get("use_cached_embeddings", False)
     if use_cached:
         logger.info("Using cached image embeddings")
@@ -1363,14 +1381,17 @@ def main(argv: list[str] | None = None) -> None:
             split="train",
             image_size=dataset_cfg["image_size"],
             model_type=model_cfg["model_type"],
+            sheets=train_sheets,
+            subsample=dataset_cfg.get("train_subsample"),
+            seed=training_cfg["seed"],
         )
-        val_split = dataset_cfg.get("val_split", "val")
         val_ds = MapSamEmbeddingDataset(
             dataset_root=str(dataset_root),
             samples_path=str(samples_path),
             split=val_split,
             image_size=dataset_cfg["image_size"],
             model_type=model_cfg["model_type"],
+            sheets=eval_sheets,
         )
     else:
         train_ds = MapSamDataset(
@@ -1378,13 +1399,16 @@ def main(argv: list[str] | None = None) -> None:
             samples_path=str(samples_path),
             split="train",
             image_size=dataset_cfg["image_size"],
+            sheets=train_sheets,
+            subsample=dataset_cfg.get("train_subsample"),
+            seed=training_cfg["seed"],
         )
-        val_split = dataset_cfg.get("val_split", "val")
         val_ds = MapSamDataset(
             dataset_root=str(dataset_root),
             samples_path=str(samples_path),
             split=val_split,
             image_size=dataset_cfg["image_size"],
+            sheets=eval_sheets,
         )
 
     if overfit_mode:

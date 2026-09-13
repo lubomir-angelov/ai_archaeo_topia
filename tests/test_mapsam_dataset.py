@@ -18,6 +18,7 @@ from archeo_topia.datasets.mapsam_dataset import (
     resize_image_and_masks,
     scale_bbox,
     scale_point,
+    select_samples,
     validate_sample_row,
 )
 
@@ -595,3 +596,89 @@ class TestMapSamDatasetGetItem:
         sample = ds[0]
         assert "original_size" not in sample
         assert "resized_size" not in sample
+
+
+class TestSelectSamples:
+    """Sample selection for leave-one-sheet-out folds."""
+
+    def _rows(self):
+        """Build a manifest spanning three sheets and two splits.
+
+        Returns:
+            List of manifest rows.
+        """
+        rows = []
+        for sheet, split, count in [
+            ("SHEET-A", "train", 5),
+            ("SHEET-B", "train", 3),
+            ("SHEET-C", "test", 4),
+        ]:
+            rows += [
+                {
+                    "sample_id": f"{split}_{sheet}_1_{i:06d}",
+                    "split": split,
+                    "sheet_id": sheet,
+                }
+                for i in range(count)
+            ]
+        return rows
+
+    def test_defaults_to_split_filtering(self):
+        selected = select_samples(self._rows(), "train")
+        assert len(selected) == 8
+        assert {r["sheet_id"] for r in selected} == {"SHEET-A", "SHEET-B"}
+
+    def test_sheets_override_split(self):
+        # SHEET-C lives in the test split but must be usable as training data.
+        selected = select_samples(self._rows(), "train", sheets=["SHEET-C"])
+        assert len(selected) == 4
+        assert {r["split"] for r in selected} == {"test"}
+
+    def test_sheets_may_span_splits(self):
+        selected = select_samples(self._rows(), "train", sheets=["SHEET-A", "SHEET-C"])
+        assert len(selected) == 9
+
+    def test_manifest_order_is_preserved(self):
+        rows = self._rows()
+        selected = select_samples(rows, "train", sheets=["SHEET-A", "SHEET-B"])
+        assert [r["sample_id"] for r in selected] == [
+            r["sample_id"] for r in rows if r["sheet_id"] in {"SHEET-A", "SHEET-B"}
+        ]
+
+    def test_unknown_sheet_raises_and_names_what_is_available(self):
+        with pytest.raises(ValueError, match="SHEET-Z"):
+            select_samples(self._rows(), "train", sheets=["SHEET-Z"])
+
+    def test_empty_split_raises(self):
+        with pytest.raises(ValueError, match="No samples found"):
+            select_samples(self._rows(), "val")
+
+    def test_subsample_caps_the_selection(self):
+        selected = select_samples(self._rows(), "train", subsample=4)
+        assert len(selected) == 4
+
+    def test_subsample_is_deterministic_for_a_seed(self):
+        rows = self._rows()
+        first = select_samples(rows, "train", subsample=4, seed=7)
+        second = select_samples(rows, "train", subsample=4, seed=7)
+        assert [r["sample_id"] for r in first] == [r["sample_id"] for r in second]
+
+    def test_subsample_does_not_depend_on_manifest_order(self):
+        rows = self._rows()
+        shuffled = list(reversed(rows))
+        assert {r["sample_id"] for r in select_samples(rows, "train", subsample=4)} == {
+            r["sample_id"] for r in select_samples(shuffled, "train", subsample=4)
+        }
+
+    def test_subsample_larger_than_selection_keeps_everything(self):
+        assert len(select_samples(self._rows(), "train", subsample=99)) == 8
+
+    def test_subsample_must_be_positive(self):
+        with pytest.raises(ValueError, match="must be positive"):
+            select_samples(self._rows(), "train", subsample=0)
+
+    def test_subsample_still_preserves_manifest_order(self):
+        rows = self._rows()
+        selected = select_samples(rows, "train", subsample=4)
+        positions = [rows.index(r) for r in selected]
+        assert positions == sorted(positions)
