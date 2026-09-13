@@ -234,7 +234,7 @@ class TestDecodeUncompressedCocoRle:
         import json
         from pathlib import Path
 
-        coco_path = Path("data/curated/datasets/cvat/v0.0.1/annotations/instances_default.json")
+        coco_path = Path("annotation/cvat/v0.0.1/instances_default.json")
         if not coco_path.exists():
             pytest.skip("COCO export not available")
 
