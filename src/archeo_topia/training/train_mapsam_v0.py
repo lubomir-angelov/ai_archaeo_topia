@@ -85,6 +85,7 @@ def resolve_config(cfg: dict[str, Any]) -> dict[str, Any]:
     ds.setdefault("train_sheets", None)
     ds.setdefault("eval_sheets", None)
     ds.setdefault("train_subsample", None)
+    ds.setdefault("window_px", None)
     result["dataset"] = ds
 
     mdl = result.get("model", {})
@@ -1372,7 +1373,23 @@ def main(argv: list[str] | None = None) -> None:
             sys.exit(1)
         logger.info("Leave-one-sheet-out: train %s, eval %s", train_sheets, eval_sheets)
 
+    window_px = dataset_cfg.get("window_px")
     use_cached = args.use_cached_embeddings or model_cfg.get("use_cached_embeddings", False)
+    if window_px is not None:
+        if use_cached:
+            # The cache holds one embedding per image tile, shared by every
+            # sample on it.  A prompt-centred window makes the encoder input
+            # per-sample, so the cached tile embedding is simply the wrong
+            # tensor — not a stale one.
+            logger.error(
+                "dataset.window_px=%d cannot use cached embeddings: the cache is "
+                "per image tile, but a window makes the encoder input per sample. "
+                "Set model.use_cached_embeddings: false for windowed runs.",
+                window_px,
+            )
+            sys.exit(1)
+        logger.info("Prompt-centred input window: %d px (source resolution)", window_px)
+
     if use_cached:
         logger.info("Using cached image embeddings")
         train_ds = MapSamEmbeddingDataset(
@@ -1402,6 +1419,7 @@ def main(argv: list[str] | None = None) -> None:
             sheets=train_sheets,
             subsample=dataset_cfg.get("train_subsample"),
             seed=training_cfg["seed"],
+            window_px=window_px,
         )
         val_ds = MapSamDataset(
             dataset_root=str(dataset_root),
@@ -1409,6 +1427,7 @@ def main(argv: list[str] | None = None) -> None:
             split=val_split,
             image_size=dataset_cfg["image_size"],
             sheets=eval_sheets,
+            window_px=window_px,
         )
 
     if overfit_mode:

@@ -20,6 +20,14 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+from archeo_topia.datasets.mapsam_window import (
+    Window,
+    bbox_into_window,
+    compute_window,
+    crop_to_window,
+    point_into_window,
+)
+
 logger = logging.getLogger(__name__)
 
 _VALID_SPLITS = {"train", "val", "test"}
@@ -553,6 +561,8 @@ class MapSamDataset(Dataset):
             for leave-one-sheet-out folds; see :func:`select_samples`.
         subsample: Cap on the number of samples kept, for size-matched folds.
         seed: Seed for the *subsample* draw.
+        window_px: Side length of a prompt-centred input window in original
+            image pixels, or ``None`` to feed the whole tile as v0.2 did.
 
     Raises:
         FileNotFoundError: If *dataset_root* or *samples_path* does not exist.
@@ -569,12 +579,14 @@ class MapSamDataset(Dataset):
         sheets: list[str] | None = None,
         subsample: int | None = None,
         seed: int = 42,
+        window_px: int | None = None,
     ) -> None:
         self.dataset_root = Path(dataset_root)
         self.samples_path = Path(samples_path)
         self.split = split
         self.image_size = image_size
         self.return_original_size = return_original_size
+        self.window_px = window_px
 
         if not self.dataset_root.exists():
             raise FileNotFoundError(f"Dataset root does not exist: {self.dataset_root}")
@@ -649,12 +661,31 @@ class MapSamDataset(Dataset):
         )
         instance_mask = torch.from_numpy(instance_mask_np).to(torch.float32).unsqueeze(0)
 
+        # Windowing happens after instance selection, so the single-instance
+        # guarantee survives it: a 1024 px window on a sheet with 120 mounds
+        # will often contain a neighbour, but the neighbour was already
+        # dropped from the target.
+        window: Window | None = None
+        if self.window_px is not None:
+            window = compute_window(
+                center_xy=(float(row["center_point"][0]), float(row["center_point"][1])),
+                image_hw=(orig_h, orig_w),
+                window_px=self.window_px,
+            )
+            image = crop_to_window(image, window)
+            instance_mask = crop_to_window(instance_mask, window)
+            ignore_mask = crop_to_window(ignore_mask, window)
+
         image_r, target_r, ignore_r = resize_image_and_masks(
             image, instance_mask, ignore_mask, self.image_size
         )
 
-        box_prompt = scale_bbox(row["bbox"], orig_h, orig_w, self.image_size)
-        point_prompt = scale_point(row["center_point"], orig_h, orig_w, self.image_size)
+        if window is not None:
+            box_prompt = bbox_into_window(row["bbox"], window, self.image_size)
+            point_prompt = point_into_window(row["center_point"], window, self.image_size)
+        else:
+            box_prompt = scale_bbox(row["bbox"], orig_h, orig_w, self.image_size)
+            point_prompt = scale_point(row["center_point"], orig_h, orig_w, self.image_size)
         point_label = torch.tensor([1], dtype=torch.int64)
 
         result: dict[str, Any] = {
@@ -668,6 +699,13 @@ class MapSamDataset(Dataset):
             "sheet_id": str(row.get("sheet_id", "")),
             "image_path": str(row["image_path"]),
         }
+
+        # The window is what maps a prediction back onto the tile's own pixel
+        # grid, which is the only grid on which the resolution arms compare.
+        result["window_xyxy"] = torch.tensor(
+            [window.x0, window.y0, window.x1, window.y1] if window else [0, 0, orig_w, orig_h],
+            dtype=torch.float32,
+        )
 
         if self.return_original_size:
             result["original_size"] = (orig_h, orig_w)
