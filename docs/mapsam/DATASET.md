@@ -63,7 +63,17 @@ No separate validation split. Test split doubles as validation during training
 | uncertain_ignore | 3 | 3 | 0 |
 | hard_negative_symbol | 530 | 434 | 96 |
 
-Each mound annotation produces one training sample with:
+**180 mound annotations produce 171 training samples**, not 180. One annotation
+(`K-34-35-B-g_3`, a 16×8 px symbol truncated at the tile's top edge) carries a
+bounding box but no geometry, and eight pairs of touching mound polygons share
+a single connected component. One further annotation splits across two
+components and one sub-20 px fragment is dropped by `min_component_area`; those
+two offset each other. Segmentation can work from the 171 samples, but
+**detection recall must be measured against the 180 annotations** — see
+`v005/PLAN.md`.
+
+Each mound annotation that survives that accounting produces one training
+sample with:
 - Binary target mask (single connected component)
 - Bounding box prompt `[x_min, y_min, x_max, y_max]`
 - Center point prompt `[cx, cy]`
