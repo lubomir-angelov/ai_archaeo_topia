@@ -20,7 +20,7 @@ Usage::
 
     python -m archeo_topia.analysis.mapsam_compare_runs \\
         --runs-dir artifacts/models/mapsam --prefix v0_3_loso \\
-        --output-dir docs/mapsam/analysis/v0_3
+        --output-dir docs/mapsam/v003/analysis
 """
 
 from __future__ import annotations

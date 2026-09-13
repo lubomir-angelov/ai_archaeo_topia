@@ -1,6 +1,6 @@
 # MapSAM v0.3 — cross-sheet generalization and input resolution
 
-Follows `RESULTS_V002.md`. Same model (SAM ViT-B, frozen image and prompt
+Follows `../v002/RESULTS.md`. Same model (SAM ViT-B, frozen image and prompt
 encoders, mask decoder only), same dataset (`data/curated/datasets/mapsam_v02`,
 3 sheets / 12 tiles / 171 samples), same optimizer and loss.
 
@@ -11,7 +11,7 @@ invalidates a number in the v0.2 report.
 
 ## Summary
 
-1. **v0.2 does not generalize across sheets.** The 0.6876 in `RESULTS_V002.md`
+1. **v0.2 does not generalize across sheets.** The 0.6876 in `../v002/RESULTS.md`
    came from the easiest of the three sheets. The other two score 0.35–0.42
    with the same recipe.
 2. **Target size does not limit accuracy — the metric made it look like it did.**
@@ -48,7 +48,7 @@ problem and the 530 `hard_negative_symbol` annotations belong to it.
 
 **Reproducibility check.** LOSO fold B is the v0.2 split. It reproduces v0.2
 exactly: `pw20_cropon` final 0.6021 / peak 0.6689 @ e5, `pw200_cropoff` peak
-0.6876 @ e25. Both match `RESULTS_V002.md`.
+0.6876 @ e25. Both match `../v002/RESULTS.md`.
 
 ---
 
@@ -111,7 +111,7 @@ The held-out sheet cannot answer this question at all — 33 of its 34 samples
 fall in 4–8 px, so its correlations swing from −0.03 to +0.59 across configs on
 pure range restriction.
 
-Artifacts: `docs/mapsam/analysis/v0_3/train/`, `.../heldout/`.
+Artifacts: `docs/mapsam/v003/analysis/train/`, `.../heldout/`.
 
 ## Question 3 — does prompt-centred cropping improve performance?
 
@@ -219,14 +219,14 @@ done
 
 # tables
 python -m archeo_topia.analysis.mapsam_compare_runs --prefix v0_3_loso \
-  --output-dir docs/mapsam/analysis/v0_3 --name cross_sheet_results
+  --output-dir docs/mapsam/v003/analysis --name cross_sheet_results
 python -m archeo_topia.analysis.mapsam_compare_runs --prefix v0_3_res \
-  --output-dir docs/mapsam/analysis/v0_3 --name resolution_results
+  --output-dir docs/mapsam/v003/analysis --name resolution_results
 
 # size analysis (no training needed; reads existing runs)
 python -m archeo_topia.analysis.mapsam_size_analysis \
   --run-dir artifacts/models/mapsam/v0_2_decoder_only_pw200_cropoff \
-  --split train --epoch 20 --output-dir docs/mapsam/analysis/v0_3/train
+  --split train --epoch 20 --output-dir docs/mapsam/v003/analysis/train
 
 # overlays
 python -m archeo_topia.training.mapsam_predict_debug \
@@ -241,7 +241,7 @@ Per-run outputs stay where they are written, under
 `artifacts/models/mapsam/v0_3_*/`: `metrics.json`, `config_resolved.json`,
 `checkpoints/`, `debug_predictions/`, and per-sample
 `prediction_stats_val_e*.jsonl`. Aggregated tables are in
-`docs/mapsam/analysis/v0_3/`.
+`docs/mapsam/v003/analysis/`.
 
 v0.1 and v0.2 artifacts are untouched; every v0.3 config writes to its own
 `outputs.root`.

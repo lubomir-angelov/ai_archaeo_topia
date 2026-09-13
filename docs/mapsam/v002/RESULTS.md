@@ -6,11 +6,11 @@ prompt points at, rather than on every mound present on the map sheet. The
 architecture, the frozen encoder, the optimiser and the source annotations are
 unchanged.
 
-The v0.1 results in `RESULTS.md` are left untouched. Read them as a record of a
+The v0.1 results in `../v001/RESULTS.md` are left untouched. Read them as a record of a
 different objective — see the comparability caveats below before putting the
 two sets of numbers side by side.
 
-Background and evidence for the change: `TRAINING_V001_FINDINGS.md`.
+Background and evidence for the change: `../v001/TRAINING_FINDINGS.md`.
 
 ## What changed
 

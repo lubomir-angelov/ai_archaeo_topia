@@ -6,7 +6,7 @@ was prompted to solve, and that the reported v0.1 metrics were computed against
 a different objective than the one the loss optimised.
 
 This document records what was found and why it matters. It does not modify any
-v0.1 result; `RESULTS.md` and `DATASET.md` are left exactly as they were so the
+v0.1 result; `RESULTS.md` and `../DATASET.md` are left exactly as they were so the
 historical record stays accurate.
 
 ## Summary
@@ -54,7 +54,7 @@ Measured on the v0.1 mask files:
 | **Total** | **172** | |
 
 172 components across 12 files, consistent with the 171 samples reported in
-`DATASET.md` once the single sub-20px component is skipped.
+`../DATASET.md` once the single sub-20px component is skipped.
 
 Weighting by sample count, the average sample's target carried **roughly 30x
 more foreground than the single mound its prompt indicated**
@@ -66,7 +66,7 @@ labels. SAM is a promptable architecture whose entire premise is that the prompt
 selects which object to segment. A label set that returns the same mask
 regardless of prompt teaches the model to ignore the prompt.
 
-`DATASET.md` already described the intended behaviour — "Binary target mask
+`../DATASET.md` already described the intended behaviour — "Binary target mask
 (single connected component)" — so the documentation and the code had diverged.
 
 ## Finding 2 — Components were labelled after downsampling

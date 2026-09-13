@@ -20,7 +20,7 @@ Usage::
     python -m archeo_topia.analysis.mapsam_size_analysis \\
         --run-dir artifacts/models/mapsam/v0_2_decoder_only_pw200_cropoff \\
         --epoch 25 \\
-        --output-dir docs/mapsam/analysis/v0_3
+        --output-dir docs/mapsam/v003/analysis
 """
 
 from __future__ import annotations
