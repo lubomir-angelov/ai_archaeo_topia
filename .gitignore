@@ -227,6 +227,3 @@ models/checkpoints/
 *.pth
 *.pt
 *.ckpt
-
-# MapSAM cached SAM image embeddings (regenerate with cache_sam_embeddings)
-data/curated/datasets/*/sam_embeddings/
