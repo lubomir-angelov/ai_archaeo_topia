@@ -1,0 +1,101 @@
+{
+  "run": "v0_3_res_c_window512_pw20",
+  "stats_file": "artifacts/models/mapsam/v0_3_res_c_window512_pw20/prediction_stats_val_e50.jsonl",
+  "logit_resolution": 256,
+  "encoder_token_grid": 64,
+  "overall": {
+    "group": "all",
+    "samples": 34,
+    "mean_iou": 0.8261,
+    "median_iou": 0.844,
+    "min_iou": 0.6887,
+    "max_iou": 0.9091,
+    "mean_dice": 0.9038,
+    "median_dice": 0.9154,
+    "zero_iou_count": 0,
+    "zero_iou_rate": 0.0,
+    "frac_iou_ge_025": 1.0,
+    "frac_iou_ge_050": 1.0,
+    "frac_iou_ge_075": 0.9118,
+    "mean_gt_px": 117.59,
+    "mean_pred_px": 123.35,
+    "pred_gt_area_ratio": 1.049,
+    "mean_abs_error_px": 22.94,
+    "mean_encoder_tokens": 2.711
+  },
+  "buckets": [
+    {
+      "group": "1-9 px",
+      "samples": 0
+    },
+    {
+      "group": "10-39 px",
+      "samples": 0
+    },
+    {
+      "group": "40-99 px",
+      "samples": 5,
+      "mean_iou": 0.8008,
+      "median_iou": 0.8077,
+      "min_iou": 0.6887,
+      "max_iou": 0.9038,
+      "mean_dice": 0.8876,
+      "median_dice": 0.8936,
+      "zero_iou_count": 0,
+      "zero_iou_rate": 0.0,
+      "frac_iou_ge_025": 1.0,
+      "frac_iou_ge_050": 1.0,
+      "frac_iou_ge_075": 0.8,
+      "mean_gt_px": 90.6,
+      "mean_pred_px": 107.4,
+      "pred_gt_area_ratio": 1.1854,
+      "mean_abs_error_px": 22.0,
+      "mean_encoder_tokens": 2.38
+    },
+    {
+      "group": "100+ px",
+      "samples": 29,
+      "mean_iou": 0.8305,
+      "median_iou": 0.8496,
+      "min_iou": 0.7037,
+      "max_iou": 0.9091,
+      "mean_dice": 0.9065,
+      "median_dice": 0.9187,
+      "zero_iou_count": 0,
+      "zero_iou_rate": 0.0,
+      "frac_iou_ge_025": 1.0,
+      "frac_iou_ge_050": 1.0,
+      "frac_iou_ge_075": 0.931,
+      "mean_gt_px": 122.24,
+      "mean_pred_px": 126.1,
+      "pred_gt_area_ratio": 1.0316,
+      "mean_abs_error_px": 23.1,
+      "mean_encoder_tokens": 2.764
+    }
+  ],
+  "sheets": [
+    {
+      "group": "K-35-8-G-a",
+      "samples": 34,
+      "mean_iou": 0.8261,
+      "median_iou": 0.844,
+      "min_iou": 0.6887,
+      "max_iou": 0.9091,
+      "mean_dice": 0.9038,
+      "median_dice": 0.9154,
+      "zero_iou_count": 0,
+      "zero_iou_rate": 0.0,
+      "frac_iou_ge_025": 1.0,
+      "frac_iou_ge_050": 1.0,
+      "frac_iou_ge_075": 0.9118,
+      "mean_gt_px": 117.59,
+      "mean_pred_px": 123.35,
+      "pred_gt_area_ratio": 1.049,
+      "mean_abs_error_px": 22.94,
+      "mean_encoder_tokens": 2.711
+    }
+  ],
+  "size_iou_correlation": 0.2008,
+  "size_iou_rank_correlation": 0.2025,
+  "size_abs_error_rank_correlation": 0.1145
+}

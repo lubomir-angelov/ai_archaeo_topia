@@ -24,6 +24,7 @@ from archeo_topia.datasets.mapsam_dataset import (
     scale_bbox,
     scale_point,
     select_instance_mask,
+    select_samples,
     validate_sample_row,
 )
 
@@ -72,6 +73,9 @@ class MapSamEmbeddingDataset(Dataset):
         image_size: Target square dimension for resizing masks.
         model_type: SAM model type (determines cache subdirectory).
         return_original_size: Include original ``(H, W)`` in dict.
+        sheets: Sheet IDs to select instead of filtering on *split*.
+        subsample: Cap on the number of samples kept, for size-matched folds.
+        seed: Seed for the *subsample* draw.
     """
 
     def __init__(
@@ -82,6 +86,9 @@ class MapSamEmbeddingDataset(Dataset):
         image_size: int = 1024,
         model_type: str = "vit_b",
         return_original_size: bool = True,
+        sheets: list[str] | None = None,
+        subsample: int | None = None,
+        seed: int = 42,
     ) -> None:
         self.dataset_root = Path(dataset_root)
         self.samples_path = Path(samples_path)
@@ -94,20 +101,15 @@ class MapSamEmbeddingDataset(Dataset):
             raise ValueError(f"Invalid split '{split}'. Must be one of {sorted(_VALID_SPLITS)}")
 
         all_rows = load_jsonl(self.samples_path)
-        self._samples: list[dict[str, Any]] = [
-            row for row in all_rows if row.get("split") == split
-        ]
-
-        if not self._samples:
-            raise ValueError(f"No samples found for split '{split}'")
+        self.sheets = sheets
+        self._samples: list[dict[str, Any]] = select_samples(
+            all_rows, split, sheets=sheets, subsample=subsample, seed=seed
+        )
 
         logger.info(
-            "MapSamEmbeddingDataset: loaded %d samples for split '%s' (embeddings from %s/%s/%s)",
+            "MapSamEmbeddingDataset: loaded %d samples (embeddings from %s)",
             len(self._samples),
-            split,
-            model_type,
-            split,
-            self.dataset_root / "sam_embeddings" / model_type / split,
+            self.dataset_root / "sam_embeddings" / model_type,
         )
 
     def __len__(self) -> int:
@@ -119,8 +121,12 @@ class MapSamEmbeddingDataset(Dataset):
 
         image_rel = row["image_path"]
         stem = Path(image_rel).stem
+        # Keyed on the row's own split, not self.split: a leave-one-sheet-out
+        # fold draws rows from whichever split directory the sheet was
+        # originally exported into.
+        row_split = row.get("split", self.split)
         cache_file = (
-            self.dataset_root / "sam_embeddings" / self.model_type / self.split / f"{stem}.pt"
+            self.dataset_root / "sam_embeddings" / self.model_type / row_split / f"{stem}.pt"
         )
 
         if not cache_file.exists():
@@ -174,7 +180,12 @@ class MapSamEmbeddingDataset(Dataset):
             "point_prompt": point_prompt,
             "point_label": point_label,
             "sample_id": row["sample_id"],
+            "sheet_id": str(row.get("sheet_id", "")),
             "image_path": str(row["image_path"]),
+            # Cached embeddings are whole-tile by construction, so the window
+            # is the tile.  Emitted anyway so cached and windowed runs expose
+            # the same field and can be scored on the same grid.
+            "window_xyxy": torch.tensor([0, 0, orig_w, orig_h], dtype=torch.float32),
         }
 
         if self.return_original_size:

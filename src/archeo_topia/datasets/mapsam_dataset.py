@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,14 @@ import numpy as np
 import torch
 from PIL import Image
 from torch.utils.data import Dataset
+
+from archeo_topia.datasets.mapsam_window import (
+    Window,
+    bbox_into_window,
+    compute_window,
+    crop_to_window,
+    point_into_window,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +213,83 @@ def scale_point(
 
     x, y = point
     return torch.tensor([x * scale_x, y * scale_y], dtype=torch.float32)
+
+
+def select_samples(
+    rows: list[dict[str, Any]],
+    split: str,
+    sheets: list[str] | None = None,
+    subsample: int | None = None,
+    seed: int = 42,
+) -> list[dict[str, Any]]:
+    """Choose the manifest rows a dataset should serve.
+
+    Two selection modes.  By default rows are filtered on ``split``, which is
+    how v0.1 and v0.2 worked.  When *sheets* is given the ``split`` field is
+    ignored and rows are filtered on ``sheet_id`` instead, which is what
+    leave-one-sheet-out evaluation needs: every sheet has to be usable as
+    either training or evaluation data without re-exporting the dataset.
+
+    Re-running ``prepare_mapsam_coco`` per fold would work too, but
+    ``sample_id`` embeds the split name, so re-splitting renames every sample
+    and breaks the join back to earlier per-sample artifacts.  Filtering keeps
+    IDs stable across folds.
+
+    *subsample* caps the result, which is how folds are made comparable: the
+    three sheets hold 120, 34 and 17 samples, so a leave-one-out fold trains
+    on 51, 137 or 154 samples and sheet difficulty is otherwise indistinguishable
+    from training-set size.  Selection is seeded and applied to a
+    ``sample_id``-sorted list, so it does not depend on manifest order.
+
+    Args:
+        rows: All rows from the manifest.
+        split: Split name, used when *sheets* is ``None``.
+        sheets: Sheet IDs to select.  Overrides *split* when given.
+        subsample: Maximum number of samples to keep, or ``None`` for all.
+        seed: Seed for the subsample draw.
+
+    Returns:
+        The selected rows, in manifest order.
+
+    Raises:
+        ValueError: If the selection is empty, if *sheets* names a sheet the
+            manifest does not contain, or if *subsample* is not positive.
+    """
+    if sheets is not None:
+        available = {row.get("sheet_id") for row in rows}
+        missing = sorted(set(sheets) - available)
+        if missing:
+            raise ValueError(
+                f"Sheets not present in manifest: {missing}. Available: {sorted(available)}"
+            )
+        wanted = set(sheets)
+        selected = [row for row in rows if row.get("sheet_id") in wanted]
+        description = f"sheets {sorted(wanted)}"
+    else:
+        selected = [row for row in rows if row.get("split") == split]
+        description = f"split '{split}'"
+
+    if not selected:
+        raise ValueError(f"No samples found for {description}")
+
+    if subsample is not None:
+        if subsample < 1:
+            raise ValueError(f"subsample must be positive, got {subsample}")
+        if subsample < len(selected):
+            ordered = sorted(selected, key=lambda row: row["sample_id"])
+            keep = {row["sample_id"] for row in random.Random(seed).sample(ordered, subsample)}
+            # Filter rather than use the sample() output directly so the
+            # result keeps manifest order, making runs diffable.
+            selected = [row for row in selected if row["sample_id"] in keep]
+        else:
+            logger.info(
+                "subsample=%d >= %d selected samples; keeping all",
+                subsample,
+                len(selected),
+            )
+
+    logger.info("Selected %d samples for %s", len(selected), description)
+    return selected
 
 
 def validate_sample_row(row: dict[str, Any]) -> None:
@@ -471,10 +557,16 @@ class MapSamDataset(Dataset):
         image_size: Target square dimension for resizing. Defaults to 1024.
         return_original_size: Include original ``(H, W)`` in returned dict.
             Defaults to ``True``.
+        sheets: Sheet IDs to select instead of filtering on *split*.  Used
+            for leave-one-sheet-out folds; see :func:`select_samples`.
+        subsample: Cap on the number of samples kept, for size-matched folds.
+        seed: Seed for the *subsample* draw.
+        window_px: Side length of a prompt-centred input window in original
+            image pixels, or ``None`` to feed the whole tile as v0.2 did.
 
     Raises:
         FileNotFoundError: If *dataset_root* or *samples_path* does not exist.
-        ValueError: If *split* is invalid or no samples match the split.
+        ValueError: If *split* is invalid or no samples match the selection.
     """
 
     def __init__(
@@ -484,12 +576,17 @@ class MapSamDataset(Dataset):
         split: str,
         image_size: int = 1024,
         return_original_size: bool = True,
+        sheets: list[str] | None = None,
+        subsample: int | None = None,
+        seed: int = 42,
+        window_px: int | None = None,
     ) -> None:
         self.dataset_root = Path(dataset_root)
         self.samples_path = Path(samples_path)
         self.split = split
         self.image_size = image_size
         self.return_original_size = return_original_size
+        self.window_px = window_px
 
         if not self.dataset_root.exists():
             raise FileNotFoundError(f"Dataset root does not exist: {self.dataset_root}")
@@ -501,17 +598,14 @@ class MapSamDataset(Dataset):
             raise ValueError(f"Invalid split '{split}'. Must be one of {sorted(_VALID_SPLITS)}")
 
         all_rows = load_jsonl(self.samples_path)
-        self._samples: list[dict[str, Any]] = [
-            row for row in all_rows if row.get("split") == split
-        ]
-
-        if not self._samples:
-            raise ValueError(f"No samples found for split '{split}'")
+        self.sheets = sheets
+        self._samples: list[dict[str, Any]] = select_samples(
+            all_rows, split, sheets=sheets, subsample=subsample, seed=seed
+        )
 
         logger.info(
-            "MapSamDataset: loaded %d samples for split '%s' from %d total rows",
+            "MapSamDataset: loaded %d samples from %d total rows",
             len(self._samples),
-            split,
             len(all_rows),
         )
 
@@ -567,12 +661,31 @@ class MapSamDataset(Dataset):
         )
         instance_mask = torch.from_numpy(instance_mask_np).to(torch.float32).unsqueeze(0)
 
+        # Windowing happens after instance selection, so the single-instance
+        # guarantee survives it: a 1024 px window on a sheet with 120 mounds
+        # will often contain a neighbour, but the neighbour was already
+        # dropped from the target.
+        window: Window | None = None
+        if self.window_px is not None:
+            window = compute_window(
+                center_xy=(float(row["center_point"][0]), float(row["center_point"][1])),
+                image_hw=(orig_h, orig_w),
+                window_px=self.window_px,
+            )
+            image = crop_to_window(image, window)
+            instance_mask = crop_to_window(instance_mask, window)
+            ignore_mask = crop_to_window(ignore_mask, window)
+
         image_r, target_r, ignore_r = resize_image_and_masks(
             image, instance_mask, ignore_mask, self.image_size
         )
 
-        box_prompt = scale_bbox(row["bbox"], orig_h, orig_w, self.image_size)
-        point_prompt = scale_point(row["center_point"], orig_h, orig_w, self.image_size)
+        if window is not None:
+            box_prompt = bbox_into_window(row["bbox"], window, self.image_size)
+            point_prompt = point_into_window(row["center_point"], window, self.image_size)
+        else:
+            box_prompt = scale_bbox(row["bbox"], orig_h, orig_w, self.image_size)
+            point_prompt = scale_point(row["center_point"], orig_h, orig_w, self.image_size)
         point_label = torch.tensor([1], dtype=torch.int64)
 
         result: dict[str, Any] = {
@@ -583,8 +696,16 @@ class MapSamDataset(Dataset):
             "point_prompt": point_prompt,
             "point_label": point_label,
             "sample_id": row["sample_id"],
+            "sheet_id": str(row.get("sheet_id", "")),
             "image_path": str(row["image_path"]),
         }
+
+        # The window is what maps a prediction back onto the tile's own pixel
+        # grid, which is the only grid on which the resolution arms compare.
+        result["window_xyxy"] = torch.tensor(
+            [window.x0, window.y0, window.x1, window.y1] if window else [0, 0, orig_w, orig_h],
+            dtype=torch.float32,
+        )
 
         if self.return_original_size:
             result["original_size"] = (orig_h, orig_w)
