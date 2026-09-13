@@ -271,7 +271,18 @@ def main(argv: list[str] | None = None) -> None:
     from segment_anything import sam_model_registry
 
     model_type = model_cfg["model_type"]
-    sam = sam_model_registry[model_type]()
+
+    # Build from the base SAM weights first.  Training checkpoints store only
+    # the parameters that were trained, so the frozen image and prompt
+    # encoders have to come from the stock checkpoint.
+    base_checkpoint = Path(model_cfg["sam_checkpoint"])
+    if not base_checkpoint.exists():
+        logger.error(
+            "Base SAM checkpoint not found: %s (needed for the frozen encoder weights)",
+            base_checkpoint,
+        )
+        sys.exit(1)
+    sam = sam_model_registry[model_type](checkpoint=str(base_checkpoint))
 
     ckpt = load_checkpoint(checkpoint_path, sam, None)  # type: ignore[arg-type]
     sam.to(device)

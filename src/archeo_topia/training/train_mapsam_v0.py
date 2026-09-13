@@ -1023,12 +1023,33 @@ def save_checkpoint(
         config: Resolved configuration dictionary.
     """
     Path(path).parent.mkdir(parents=True, exist_ok=True)
+
+    # Save only the parameters that were actually trained.  With the image
+    # encoder frozen, a full state_dict is ~358 MB of which ~342 MB is a
+    # byte-identical copy of the stock SAM weights the model was built from,
+    # so the frozen modules are recoverable from *sam_checkpoint* alone.
+    # Which modules are trainable is config-driven, so derive the set from
+    # requires_grad rather than hard-coding the mask decoder.
+    trainable_names = {name for name, p in sam.named_parameters() if p.requires_grad}
+    full_state = sam.state_dict()
+    partial_state = {k: v for k, v in full_state.items() if k in trainable_names}
+
+    logger.info(
+        "Saving checkpoint: %d/%d tensors (%.1f MB of %.1f MB); frozen weights come from %s",
+        len(partial_state),
+        len(full_state),
+        _state_dict_bytes(partial_state) / 1048576,
+        _state_dict_bytes(full_state) / 1048576,
+        sam_checkpoint,
+    )
+
     torch.save(
         {
             "epoch": epoch,
             "model_type": model_type,
             "sam_checkpoint": sam_checkpoint,
-            "model_state_dict": sam.state_dict(),
+            "state_dict_scope": "trainable",
+            "model_state_dict": partial_state,
             "optimizer_state_dict": optimizer.state_dict(),
             "train_loss": train_loss,
             "val_loss": val_loss,
@@ -1038,6 +1059,18 @@ def save_checkpoint(
     )
 
 
+def _state_dict_bytes(state: dict[str, torch.Tensor]) -> int:
+    """Total size in bytes of the tensors in a state dict.
+
+    Args:
+        state: Mapping of parameter name to tensor.
+
+    Returns:
+        Combined size of all tensors in bytes.
+    """
+    return sum(t.numel() * t.element_size() for t in state.values() if torch.is_tensor(t))
+
+
 def load_checkpoint(
     path: str | Path,
     sam: nn.Module,
@@ -1045,17 +1078,51 @@ def load_checkpoint(
 ) -> dict[str, Any]:
     """Load a training checkpoint.
 
+    Handles both checkpoint layouts:
+
+    ``state_dict_scope == "trainable"``
+        Only the trained parameters are stored.  *sam* must already carry the
+        stock weights it was built from, which is how :func:`build_sam` and
+        every caller construct it; the trained tensors are layered on top.
+
+    Legacy checkpoints (no ``state_dict_scope`` key)
+        The whole model was stored; loaded strictly as before.
+
     Args:
         path: Checkpoint file path.
-        sam: SAM model to restore weights into.
+        sam: SAM model to restore weights into, already built from the base
+            SAM checkpoint named by the training config.
         optimizer: Optimizer to restore state into. May be ``None``
             when loading for inference only.
 
     Returns:
         Checkpoint dictionary.
+
+    Raises:
+        ValueError: If a partial checkpoint carries tensors the model does not
+            have, which means it was built for a different model type.
     """
     ckpt = torch.load(str(path), map_location="cpu", weights_only=False)
-    sam.load_state_dict(ckpt["model_state_dict"])
+    state = ckpt["model_state_dict"]
+
+    if ckpt.get("state_dict_scope") == "trainable":
+        incompatible = sam.load_state_dict(state, strict=False)
+        if incompatible.unexpected_keys:
+            raise ValueError(
+                f"Checkpoint {path} contains {len(incompatible.unexpected_keys)} tensors "
+                f"absent from this model (first: {incompatible.unexpected_keys[0]}). "
+                f"It was saved for model_type={ckpt.get('model_type')!r}."
+            )
+        logger.info(
+            "Loaded %d trained tensors from %s; frozen weights retained from %s",
+            len(state),
+            path,
+            ckpt.get("sam_checkpoint", "the base SAM checkpoint"),
+        )
+    else:
+        sam.load_state_dict(state)
+        logger.info("Loaded full state dict (legacy checkpoint) from %s", path)
+
     if optimizer is not None:
         optimizer.load_state_dict(ckpt["optimizer_state_dict"])
     return ckpt
