@@ -16,7 +16,9 @@ from PIL import Image
 
 from archeo_topia.datasets.mapsam_dataset import (
     MapSamDataset,
+    _label_foreground,
     count_connected_components,
+    label_mask_file,
     select_instance_mask,
 )
 
@@ -335,3 +337,58 @@ class TestRoundingFallback:
         assert result[20, 20] == 1
         assert result[70, 70] == 0
         assert count_connected_components(result) == 1
+
+
+class TestLabelCacheEquivalence:
+    """The cached label path must match the uncached path exactly."""
+
+    def _write_mask(self, path: Path, arr: np.ndarray) -> None:
+        Image.fromarray((arr * 255).astype(np.uint8), mode="L").save(str(path))
+
+    def test_cached_labels_match_uncached(self, tmp_path: Path) -> None:
+        arr = np.zeros((40, 40), dtype=np.uint8)
+        arr[2:8, 2:8] = 1
+        arr[20:28, 20:28] = 1
+        arr[30:34, 5:9] = 1
+        mask_file = tmp_path / "mask.png"
+        self._write_mask(mask_file, arr)
+
+        label_mask_file.cache_clear()
+        labeled, n = label_mask_file(str(mask_file))
+        assert n == 3
+
+        direct, n_direct = _label_foreground(arr > 0, 8)
+        assert n_direct == n
+        assert np.array_equal(labeled, direct)
+
+    def test_selection_identical_with_and_without_cache(self, tmp_path: Path) -> None:
+        arr = np.zeros((40, 40), dtype=np.uint8)
+        arr[2:8, 2:8] = 1
+        arr[20:28, 20:28] = 1
+        mask_file = tmp_path / "mask.png"
+        self._write_mask(mask_file, arr)
+
+        label_mask_file.cache_clear()
+        cached = label_mask_file(str(mask_file))
+
+        point = (23.0, 23.0)
+        bbox = (20.0, 20.0, 28.0, 28.0)
+
+        without = select_instance_mask(arr, point, bbox, sample_id="s")
+        with_cache = select_instance_mask(
+            arr, point, bbox, sample_id="s", labeled_components=cached
+        )
+        assert np.array_equal(without, with_cache)
+        assert with_cache[23, 23] == 1
+        assert with_cache[5, 5] == 0
+
+    def test_cached_array_is_read_only(self, tmp_path: Path) -> None:
+        arr = np.zeros((20, 20), dtype=np.uint8)
+        arr[5:10, 5:10] = 1
+        mask_file = tmp_path / "mask.png"
+        self._write_mask(mask_file, arr)
+
+        label_mask_file.cache_clear()
+        labeled, _ = label_mask_file(str(mask_file))
+        with pytest.raises(ValueError):
+            labeled[0, 0] = 99

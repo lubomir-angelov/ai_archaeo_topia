@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -256,12 +257,81 @@ def count_connected_components(
     return num_features
 
 
+def _label_foreground(
+    foreground: np.ndarray,
+    connectivity: int = 8,
+) -> tuple[np.ndarray, int]:
+    """Label connected components of a boolean foreground mask.
+
+    Args:
+        foreground: 2D boolean array.
+        connectivity: Connected-component connectivity, either 4 or 8.
+
+    Returns:
+        Tuple of ``(labeled_array, num_features)``.
+    """
+    from scipy.ndimage import label
+
+    if connectivity == 8:
+        structure = np.ones((3, 3), dtype=int)
+    else:
+        structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+
+    return label(foreground, structure=structure)
+
+
+@lru_cache(maxsize=32)
+def load_binary_mask_cached(mask_path: str) -> torch.Tensor:
+    """Load a binary mask file, cached by path.
+
+    Sheet masks are shared by every sample generated from that sheet, so the
+    uncached loader re-decodes the same multi-megapixel PNG once per sample.
+
+    Args:
+        mask_path: Path to the binary mask file.
+
+    Returns:
+        Mask tensor of shape ``(1, H, W)``.  Shared across callers, so
+        treat it as read-only.
+    """
+    return load_binary_mask(Path(mask_path))
+
+
+@lru_cache(maxsize=32)
+def label_mask_file(
+    mask_path: str,
+    connectivity: int = 8,
+) -> tuple[np.ndarray, int]:
+    """Label a mask file's connected components, cached by path.
+
+    Every sample generated from one map sheet shares that sheet's mask file,
+    so labeling it per sample re-does the same work up to 56 times per epoch.
+    Labeling a full-resolution sheet costs ~200 ms, which dominated dataset
+    throughput; caching per file makes it a one-off.
+
+    The returned array is marked read-only because it is shared across every
+    caller holding the same cache entry.
+
+    Args:
+        mask_path: Path to the binary mask file.
+        connectivity: Connected-component connectivity, either 4 or 8.
+
+    Returns:
+        Tuple of ``(labeled_array, num_features)``.
+    """
+    mask = load_binary_mask(Path(mask_path)).squeeze(0).numpy()
+    labeled, num_features = _label_foreground(mask > 0, connectivity)
+    labeled.flags.writeable = False
+    return labeled, num_features
+
+
 def select_instance_mask(
     semantic_mask: np.ndarray,
     center_point_xy: tuple[float, float],
     bbox_xyxy: tuple[float, float, float, float],
     connectivity: int = 8,
     sample_id: str = "",
+    labeled_components: tuple[np.ndarray, int] | None = None,
 ) -> np.ndarray:
     """Select one connected component from a semantic mask.
 
@@ -277,6 +347,10 @@ def select_instance_mask(
         bbox_xyxy: Prompt bbox ``(x1, y1, x2, y2)``.
         connectivity: Connected-component connectivity, 4 or 8.
         sample_id: Sample identifier for error context.
+        labeled_components: Optional precomputed ``(labeled, num_features)``
+            for *semantic_mask*, as returned by :func:`label_mask_file`.
+            Supplying it skips the labeling step, which dominates runtime on
+            full-resolution sheet masks.
 
     Returns:
         Binary uint8 mask with only the selected component.
@@ -284,19 +358,16 @@ def select_instance_mask(
     Raises:
         ValueError: If no foreground component can be selected.
     """
-    from scipy.ndimage import label
-
     foreground = semantic_mask > 0
     if not foreground.any():
         ctx = f" (sample_id={sample_id})" if sample_id else ""
         raise ValueError(f"No foreground pixels in semantic mask{ctx}")
 
-    if connectivity == 8:
-        structure = np.ones((3, 3), dtype=int)
+    if labeled_components is not None:
+        labeled, num_features = labeled_components
     else:
-        structure = np.array([[0, 1, 0], [1, 1, 1], [0, 1, 0]], dtype=int)
+        labeled, num_features = _label_foreground(foreground, connectivity)
 
-    labeled, num_features = label(foreground, structure=structure)
     if num_features == 0:
         ctx = f" (sample_id={sample_id})" if sample_id else ""
         raise ValueError(f"No connected components found in semantic mask{ctx}")
@@ -474,35 +545,39 @@ class MapSamDataset(Dataset):
                 f"image size ({orig_h}, {orig_w}) for {row['sample_id']}"
             )
 
+        # Select the prompted instance at ORIGINAL resolution, before any
+        # resize.  Mound symbols are ~459 px at source scale and shrink to
+        # ~79 px at 1024, so labelling a downsampled mask risks fragmenting
+        # or erasing thin symbols before the component is ever chosen.
+        semantic_mask_np = target_mask.squeeze(0).cpu().numpy()
+        instance_mask_np = select_instance_mask(
+            semantic_mask=semantic_mask_np,
+            center_point_xy=(
+                float(row["center_point"][0]),
+                float(row["center_point"][1]),
+            ),
+            bbox_xyxy=(
+                float(row["bbox"][0]),
+                float(row["bbox"][1]),
+                float(row["bbox"][2]),
+                float(row["bbox"][3]),
+            ),
+            sample_id=row["sample_id"],
+            labeled_components=label_mask_file(str(mask_path)),
+        )
+        instance_mask = torch.from_numpy(instance_mask_np).to(torch.float32).unsqueeze(0)
+
         image_r, target_r, ignore_r = resize_image_and_masks(
-            image, target_mask, ignore_mask, self.image_size
+            image, instance_mask, ignore_mask, self.image_size
         )
 
         box_prompt = scale_bbox(row["bbox"], orig_h, orig_w, self.image_size)
         point_prompt = scale_point(row["center_point"], orig_h, orig_w, self.image_size)
         point_label = torch.tensor([1], dtype=torch.int64)
 
-        # Select the instance-specific target mask from the resized semantic mask
-        semantic_mask_np = target_r.squeeze(0).cpu().numpy()
-        instance_mask_np = select_instance_mask(
-            semantic_mask=semantic_mask_np,
-            center_point_xy=(
-                float(point_prompt[0]),
-                float(point_prompt[1]),
-            ),
-            bbox_xyxy=(
-                float(box_prompt[0]),
-                float(box_prompt[1]),
-                float(box_prompt[2]),
-                float(box_prompt[3]),
-            ),
-            sample_id=row["sample_id"],
-        )
-        instance_mask_tensor = torch.tensor(instance_mask_np, dtype=torch.float32).unsqueeze(0)
-
         result: dict[str, Any] = {
             "image": image_r,
-            "target_mask": instance_mask_tensor,
+            "target_mask": target_r,
             "ignore_mask": ignore_r,
             "box_prompt": box_prompt,
             "point_prompt": point_prompt,

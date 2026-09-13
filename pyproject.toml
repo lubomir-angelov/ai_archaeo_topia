@@ -29,6 +29,7 @@ sam = [
     "segment-anything @ git+https://github.com/facebookresearch/segment-anything.git",
     "opencv-python>=4.8",
     "scipy>=1.11",
+    "tqdm>=4.66",
 ]
 sam2 = [
     "torch>=2.0",
