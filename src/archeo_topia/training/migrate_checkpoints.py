@@ -37,7 +37,10 @@ from typing import Any
 
 import torch
 
+from archeo_topia.training.train_mapsam_v0 import frozen_weights_digest
+
 logger = logging.getLogger(__name__)
+
 
 def trained_module_prefixes(config: dict[str, Any]) -> set[str]:
     """Work out which top-level modules were trained, from a stored config.
@@ -129,11 +132,29 @@ def migrate_file(
     ckpt = torch.load(str(path), map_location="cpu", weights_only=False)
 
     if ckpt.get("state_dict_scope") == "trainable":
+        if ckpt.get("frozen_weights_sha256"):
+            return {
+                "path": path,
+                "status": "skipped-already-migrated",
+                "before": before,
+                "after": before,
+            }
+        # Migrated before digest pinning existed.  The frozen half is the
+        # stock weights for every module the file does not carry, so the
+        # digest can be computed without the original full checkpoint.
+        if not apply:
+            return {"path": path, "status": "would-restamp", "before": before, "after": before}
+        lean = ckpt["model_state_dict"]
+        reconstructed = {**stock, **lean}
+        ckpt["frozen_weights_sha256"] = frozen_weights_digest(reconstructed, set(lean))
+        tmp = path.with_suffix(".migrating")
+        torch.save(ckpt, str(tmp))
+        os.replace(str(tmp), str(path))
         return {
             "path": path,
-            "status": "skipped-already-migrated",
+            "status": "restamped",
             "before": before,
-            "after": before,
+            "after": path.stat().st_size,
         }
 
     original = ckpt["model_state_dict"]
@@ -161,6 +182,7 @@ def migrate_file(
         "state_dict_scope": "trainable",
         "model_state_dict": keep,
         "has_optimizer_state": keep_optimizer,
+        "frozen_weights_sha256": frozen_weights_digest(original, set(keep)),
     }
     if keep_optimizer and "optimizer_state_dict" in ckpt:
         payload["optimizer_state_dict"] = ckpt["optimizer_state_dict"]

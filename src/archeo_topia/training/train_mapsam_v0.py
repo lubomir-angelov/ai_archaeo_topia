@@ -16,6 +16,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
@@ -1053,6 +1054,9 @@ def save_checkpoint(
         "val_loss": val_loss,
         "config": config,
         "has_optimizer_state": include_optimizer,
+        # Pins the base the frozen half must come from.  Without this a
+        # mismatched base loads cleanly and predicts nonsense.
+        "frozen_weights_sha256": frozen_weights_digest(full_state, trainable_names),
     }
     if include_optimizer:
         payload["optimizer_state_dict"] = optimizer.state_dict()
@@ -1069,6 +1073,52 @@ def save_checkpoint(
     )
 
     torch.save(payload, str(path))
+
+
+def frozen_weights_digest(
+    state: dict[str, torch.Tensor],
+    trainable_names: set[str],
+) -> str:
+    """Digest the weights a partial checkpoint does *not* store.
+
+    A trainable-only checkpoint is meaningless without the frozen weights the
+    model was built from, and a mismatched base is silently wrong rather than
+    loudly broken: the shapes still fit, so the model loads and predicts
+    nonsense.  Recording a digest of the frozen tensors at save time lets the
+    load path prove the base matches.
+
+    The digest covers the tensors as they exist in the model, not the file
+    they came from, so it holds however the base weights were obtained.
+
+    Args:
+        state: Full model state dict.
+        trainable_names: Names of the tensors the checkpoint stores itself.
+
+    Returns:
+        Hex SHA-256 over the frozen tensors, in sorted name order.
+    """
+    h = hashlib.sha256()
+    for name in sorted(k for k in state if k not in trainable_names):
+        tensor = state[name]
+        h.update(name.encode("utf-8"))
+        h.update(tensor.detach().cpu().contiguous().numpy().tobytes())
+    return h.hexdigest()
+
+
+def file_digest(path: str | Path) -> str:
+    """SHA-256 of a file, read in chunks.
+
+    Args:
+        path: File to hash.
+
+    Returns:
+        Hex SHA-256 digest.
+    """
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def build_metrics_record(
@@ -1150,6 +1200,21 @@ def load_checkpoint(
     state = ckpt["model_state_dict"]
 
     if ckpt.get("state_dict_scope") == "trainable":
+        expected = ckpt.get("frozen_weights_sha256")
+        if expected:
+            # Verify before loading, while the model still holds only the
+            # base weights.  A mismatched base is silently wrong rather than
+            # broken: the shapes fit, so it would load and predict nonsense.
+            actual = frozen_weights_digest(sam.state_dict(), set(state))
+            if actual != expected:
+                raise ValueError(
+                    f"Checkpoint {path} was trained on a different set of frozen weights "
+                    f"than this model carries (expected {expected[:16]}..., got "
+                    f"{actual[:16]}...). Build the model from "
+                    f"{ckpt.get('sam_checkpoint', 'the base SAM checkpoint')} and retry; "
+                    f"loading it as-is would produce a model that runs but is wrong."
+                )
+
         incompatible = sam.load_state_dict(state, strict=False)
         if incompatible.unexpected_keys:
             raise ValueError(
@@ -1158,9 +1223,10 @@ def load_checkpoint(
                 f"It was saved for model_type={ckpt.get('model_type')!r}."
             )
         logger.info(
-            "Loaded %d trained tensors from %s; frozen weights retained from %s",
+            "Loaded %d trained tensors from %s; frozen weights %s from %s",
             len(state),
             path,
+            "verified" if expected else "unverified (checkpoint predates pinning)",
             ckpt.get("sam_checkpoint", "the base SAM checkpoint"),
         )
     else:

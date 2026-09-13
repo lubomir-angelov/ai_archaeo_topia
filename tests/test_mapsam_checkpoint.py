@@ -16,16 +16,28 @@ import pytest
 import torch
 from torch import nn
 
-from archeo_topia.training.train_mapsam_v0 import load_checkpoint, save_checkpoint
+from archeo_topia.training.train_mapsam_v0 import (
+    file_digest,
+    frozen_weights_digest,
+    load_checkpoint,
+    save_checkpoint,
+)
 
 
 class TinyModel(nn.Module):
-    """Stand-in with a frozen 'encoder' and a trainable 'decoder'."""
+    """Stand-in with a frozen 'encoder' and a trainable 'decoder'.
+
+    Initialised from a fixed seed so every instance carries identical frozen
+    weights, standing in for models built from the same stock SAM checkpoint.
+    Tests that need a mismatched base overwrite those weights explicitly.
+    """
 
     def __init__(self) -> None:
         super().__init__()
-        self.image_encoder = nn.Linear(8, 8)
-        self.mask_decoder = nn.Linear(8, 4)
+        with torch.random.fork_rng():
+            torch.manual_seed(0)
+            self.image_encoder = nn.Linear(8, 8)
+            self.mask_decoder = nn.Linear(8, 4)
 
     def freeze_encoder(self) -> None:
         """Mark the encoder as frozen, as the training script does."""
@@ -100,8 +112,6 @@ class TestPartialLoad:
 
         dst = TinyModel()
         dst.freeze_encoder()
-        with torch.no_grad():
-            dst.image_encoder.weight.fill_(7.0)
         before = dst.image_encoder.weight.clone()
         load_checkpoint(p, dst)
         assert torch.equal(dst.image_encoder.weight, before)
@@ -234,3 +244,94 @@ class TestOptimizerStateSplit:
         dst.freeze_encoder()
         load_checkpoint(p, dst, None)
         assert torch.equal(dst.mask_decoder.weight, m.mask_decoder.weight)
+
+
+class TestFrozenWeightsPinning:
+    """A partial checkpoint is only correct against the base it was trained on.
+
+    A substituted base is silently wrong rather than broken - the shapes still
+    fit, so the model loads and predicts nonsense - so the mismatch has to be
+    caught at load time.
+    """
+
+    def test_digest_is_deterministic(self) -> None:
+        m = TinyModel()
+        sd = m.state_dict()
+        names = {"mask_decoder.weight", "mask_decoder.bias"}
+        assert frozen_weights_digest(sd, names) == frozen_weights_digest(sd, names)
+
+    def test_digest_ignores_trained_tensors(self) -> None:
+        """Training must not change the digest, or every load would fail."""
+        m = TinyModel()
+        names = {"mask_decoder.weight", "mask_decoder.bias"}
+        before = frozen_weights_digest(m.state_dict(), names)
+        with torch.no_grad():
+            m.mask_decoder.weight.fill_(3.3)
+        assert frozen_weights_digest(m.state_dict(), names) == before
+
+    def test_digest_tracks_frozen_tensors(self) -> None:
+        m = TinyModel()
+        names = {"mask_decoder.weight", "mask_decoder.bias"}
+        before = frozen_weights_digest(m.state_dict(), names)
+        with torch.no_grad():
+            m.image_encoder.weight.fill_(3.3)
+        assert frozen_weights_digest(m.state_dict(), names) != before
+
+    def test_checkpoint_records_the_digest(self, tmp_path: Path) -> None:
+        m = TinyModel()
+        m.freeze_encoder()
+        p = tmp_path / "ck.pt"
+        _save(p, m)
+        ck = torch.load(str(p), map_location="cpu", weights_only=False)
+        assert len(ck["frozen_weights_sha256"]) == 64
+
+    def test_matching_base_loads(self, tmp_path: Path) -> None:
+        src = TinyModel()
+        src.freeze_encoder()
+        p = tmp_path / "ck.pt"
+        _save(p, src)
+
+        dst = TinyModel()
+        dst.freeze_encoder()
+        load_checkpoint(p, dst)
+        assert torch.equal(dst.mask_decoder.weight, src.mask_decoder.weight)
+
+    def test_mismatched_base_is_refused(self, tmp_path: Path) -> None:
+        src = TinyModel()
+        src.freeze_encoder()
+        p = tmp_path / "ck.pt"
+        _save(p, src)
+
+        wrong = TinyModel()
+        wrong.freeze_encoder()
+        with torch.no_grad():
+            wrong.image_encoder.weight.fill_(99.0)
+        with pytest.raises(ValueError, match="different set of frozen weights"):
+            load_checkpoint(p, wrong)
+
+    def test_checkpoint_without_digest_still_loads(self, tmp_path: Path) -> None:
+        """Files migrated before pinning existed must keep working."""
+        m = TinyModel()
+        m.freeze_encoder()
+        p = tmp_path / "ck.pt"
+        _save(p, m)
+        ck = torch.load(str(p), map_location="cpu", weights_only=False)
+        del ck["frozen_weights_sha256"]
+        torch.save(ck, str(p))
+
+        dst = TinyModel()
+        dst.freeze_encoder()
+        with torch.no_grad():
+            dst.image_encoder.weight.fill_(42.0)  # would fail a digest check
+        load_checkpoint(p, dst)  # unverifiable, but must not raise
+        assert torch.equal(dst.mask_decoder.weight, m.mask_decoder.weight)
+
+
+class TestFileDigest:
+    def test_matches_hashlib(self, tmp_path: Path) -> None:
+        import hashlib
+
+        p = tmp_path / "blob.bin"
+        data = b"archaeological mound symbols" * 5000
+        p.write_bytes(data)
+        assert file_digest(p) == hashlib.sha256(data).hexdigest()
