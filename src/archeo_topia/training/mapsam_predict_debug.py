@@ -2,7 +2,8 @@
 """Debug prediction script for MapSAM checkpoints.
 
 Generates overlay images showing ground truth, predictions, and prompts
-for visual inspection.
+for visual inspection.  Supports cached embeddings and prediction
+statistics output.
 
 Usage::
 
@@ -17,21 +18,28 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 from torch.utils.data import DataLoader
 
 from archeo_topia.datasets.mapsam_dataset import (
     MapSamDataset,
     count_connected_components,
 )
+from archeo_topia.datasets.mapsam_embedding_dataset import (
+    MapSamEmbeddingDataset,
+)
 from archeo_topia.training.train_mapsam_v0 import (
+    compute_prediction_stats,
     forward_sam,
+    forward_sam_cached,
     load_checkpoint,
     resolve_config,
 )
@@ -54,7 +62,33 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--split", default="val", choices=["train", "val", "test"])
     parser.add_argument("--output-dir", required=True, help="Output directory for overlays")
     parser.add_argument("--max-samples", type=int, default=16, help="Maximum samples to process")
+    parser.add_argument(
+        "--use-cached-embeddings",
+        action="store_true",
+        help="Use pre-computed image embeddings from cache",
+    )
     return parser.parse_args(argv)
+
+
+def _try_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """Load a font at *size*, falling back to default.
+
+    Args:
+        size: Desired font size in pixels.
+
+    Returns:
+        PIL font object.
+    """
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
 
 
 def draw_overlay(
@@ -64,16 +98,21 @@ def draw_overlay(
     ignore_mask_np: np.ndarray,
     box_prompt: list[float],
     point_prompt: list[float],
-    sample_id: str = "",
+    sample_id: str,
+    iou: float,
+    dice: float,
+    gt_positive_pixels: int,
+    pred_positive_pixels: int,
+    pred_prob_max: float,
+    target_n_components: int = 1,
 ) -> Image.Image:
     """Create a composite overlay image for debugging.
 
-    Layout (5 panels, left to right):
-        1. Original image + bbox + point
-        2. Ground truth instance mask
-        3. Predicted mask (threshold=0.5)
-        4. Ignore mask
-        5. GT vs Prediction comparison
+    Layout (5 panels, arranged in grid):
+        Row 1: Image+prompts | GT mask | Prediction (threshold=0.5)
+        Row 2: Ignore mask   | GT vs Pred overlap
+
+    Each panel includes metrics in the title area.
 
     Args:
         image_np: RGB image array ``(H, W, 3)`` in [0, 255].
@@ -82,42 +121,26 @@ def draw_overlay(
         ignore_mask_np: Binary ignore mask ``(H, W)`` in [0, 1].
         box_prompt: Bounding box ``[x1, y1, x2, y2]``.
         point_prompt: Point ``[x, y]``.
-        sample_id: Sample identifier for titles.
+        sample_id: Sample identifier for labeling.
+        iou: Intersection-over-union score.
+        dice: Dice coefficient.
+        gt_positive_pixels: Count of positive pixels in GT.
+        pred_positive_pixels: Count of positive pixels in prediction.
+        pred_prob_max: Maximum prediction probability.
+        target_n_components: Connected-component count of the target mask.
 
     Returns:
         PIL Image with the composite overlay.
     """
     h, w = image_np.shape[:2]
+    small_font = _try_font(11)
 
-    # Compute metrics
-    gt_bool = target_mask_np > 0.5
-    pred_bool = pred_mask_np > 0.5
-    intersection = (gt_bool & pred_bool).sum()
-    union = (gt_bool | pred_bool).sum()
-    iou = float(intersection) / float(union) if union > 0 else 0.0
-    dice = (
-        (2.0 * intersection) / (gt_bool.sum() + pred_bool.sum())
-        if (gt_bool.sum() + pred_bool.sum()) > 0
-        else 0.0
+    panels: list[tuple[Image.Image, str]] = []
+
+    info_text = (
+        f"{sample_id}  IoU={iou:.3f}  Dice={dice:.3f}  "
+        f"GT+={gt_positive_pixels}  Pred+={pred_positive_pixels}  Pmax={pred_prob_max:.3f}"
     )
-    target_pos = int(gt_bool.sum())
-    pred_pos = int(pred_bool.sum())
-    target_ncc = count_connected_components(target_mask_np)
-
-    # Warn if target has multiple components
-    if target_ncc > 1:
-        logger.warning(
-            "Target mask has %d components for sample_id=%s (expected 1)",
-            target_ncc,
-            sample_id,
-        )
-
-    # Title text
-    title = (
-        f"{sample_id} | GT={target_pos}px | Pred={pred_pos}px | IoU={iou:.3f} | Dice={dice:.3f}"
-    )
-
-    panels: list[Image.Image] = []
 
     # Panel 1: image + prompts
     p1 = Image.fromarray(np.clip(image_np, 0, 255).astype(np.uint8))
@@ -130,52 +153,77 @@ def draw_overlay(
     cx, cy = int(point_prompt[0]), int(point_prompt[1])
     r = 5
     draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill="green")
-    _add_title(p1, "Image + Prompts")
-    panels.append(p1)
+    panels.append((p1, "Image + bbox + point"))
 
-    # Panel 2: GT instance mask
+    # Panel 2: GT mask
     gt_arr = np.clip(target_mask_np * 255, 0, 255).astype(np.uint8)
     p2 = Image.fromarray(gt_arr, mode="L").convert("RGB")
-    _add_title(p2, f"GT instance mask (n={target_ncc})")
-    panels.append(p2)
+    panels.append((p2, f"GT instance mask (n={target_n_components})"))
 
     # Panel 3: Pred mask
     pred_arr = np.clip(pred_mask_np * 255, 0, 255).astype(np.uint8)
     p3 = Image.fromarray(pred_arr, mode="L").convert("RGB")
-    _add_title(p3, "Pred mask (threshold=0.5)")
-    panels.append(p3)
+    panels.append((p3, f"Prediction, threshold=0.5\n{info_text}"))
 
     # Panel 4: Ignore mask
     ign_arr = np.clip(ignore_mask_np * 255, 0, 255).astype(np.uint8)
     p4 = Image.fromarray(ign_arr, mode="L").convert("RGB")
-    _add_title(p4, "Ignore mask")
-    panels.append(p4)
+    panels.append((p4, "Ignore mask"))
 
-    # Panel 5: GT vs Pred comparison
-    # Green = GT only, Red = Pred only, Yellow = overlap, Black = neither
-    comp_arr = np.zeros((h, w, 3), dtype=np.uint8)
-    comp_arr[gt_bool & ~pred_bool] = [0, 255, 0]
-    comp_arr[~gt_bool & pred_bool] = [255, 0, 0]
-    comp_arr[gt_bool & pred_bool] = [255, 255, 0]
-    p5 = Image.fromarray(comp_arr)
-    _add_title(p5, "GT vs Pred (G=GT R=Pred Y=overlap)")
-    panels.append(p5)
+    # Panel 5: GT vs Pred overlap
+    overlap = np.zeros((h, w, 3), dtype=np.uint8)
+    gt_only = (target_mask_np > 0.5) & (pred_mask_np <= 0.5)
+    pred_only = (target_mask_np <= 0.5) & (pred_mask_np > 0.5)
+    both = (target_mask_np > 0.5) & (pred_mask_np > 0.5)
 
-    total_w = w * 5
-    title_h = 24
-    composite = Image.new("RGB", (total_w, h + title_h), color=(30, 30, 30))
-    draw_comp = ImageDraw.Draw(composite)
-    draw_comp.text((4, 2), title, fill=(255, 255, 255))
-    for i, panel in enumerate(panels):
-        composite.paste(panel, (i * w, title_h))
+    overlap[gt_only] = [0, 255, 0]
+    overlap[pred_only] = [255, 0, 255]
+    overlap[both] = [255, 255, 0]
+
+    p5 = Image.fromarray(overlap)
+    panels.append((p5, "GT vs Pred\nyellow=overlap green=GT magenta=Pred"))
+
+    # Layout: 3 panels top, 2 panels bottom
+    top_w = w * 3
+    bottom_w = w * 2
+
+    top_row = Image.new("RGB", (top_w, h))
+    for i, (img, _) in enumerate(panels[:3]):
+        top_row.paste(img, (i * w, 0))
+
+    bottom_row = Image.new("RGB", (bottom_w, h))
+    for i, (img, _) in enumerate(panels[3:]):
+        bottom_row.paste(img, (i * w, 0))
+
+    # Add labels
+    label_h = 24
+    label_row = Image.new("RGB", (top_w, label_h), color=(30, 30, 30))
+    ld = ImageDraw.Draw(label_row)
+    panel_labels = [p[1] for p in panels[:3]]
+    x = 0
+    for label in panel_labels:
+        ld.text((x + w // 2 - 40, 4), label, fill="white", font=small_font)
+        x += w
+
+    label_row2 = Image.new("RGB", (bottom_w, label_h), color=(30, 30, 30))
+    ld2 = ImageDraw.Draw(label_row2)
+    panel_labels2 = [p[1] for p in panels[3:]]
+    x = 0
+    for label in panel_labels2:
+        lines = label.split("\n")
+        for li, line in enumerate(lines):
+            ld2.text((x + w // 2 - 60, 4 + li * 12), line, fill="white", font=small_font)
+        x += w
+
+    total_w = max(top_w, bottom_w)
+    total_h = label_h * 2 + h * 2
+    composite = Image.new("RGB", (total_w, total_h), color=(10, 10, 10))
+    composite.paste(top_row, (0, 0))
+    composite.paste(label_row, (0, h))
+    composite.paste(bottom_row, (0, h + label_h))
+    composite.paste(label_row2, (0, h * 2 + label_h))
 
     return composite
-
-
-def _add_title(img: Image.Image, text: str) -> None:
-    """Draw text at the top-left corner of an image."""
-    draw = ImageDraw.Draw(img)
-    draw.text((4, 2), text, fill=(255, 255, 255))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -231,28 +279,57 @@ def main(argv: list[str] | None = None) -> None:
 
     logger.info("Checkpoint loaded from epoch %d", ckpt.get("epoch", "?"))
 
-    ds = MapSamDataset(
-        dataset_root=str(dataset_root),
-        samples_path=str(samples_path),
-        split=args.split,
-        image_size=dataset_cfg["image_size"],
-    )
+    use_cached = args.use_cached_embeddings
+    if use_cached:
+        ds = MapSamEmbeddingDataset(
+            dataset_root=str(dataset_root),
+            samples_path=str(samples_path),
+            split=args.split,
+            image_size=dataset_cfg["image_size"],
+            model_type=model_type,
+        )
+    else:
+        ds = MapSamDataset(
+            dataset_root=str(dataset_root),
+            samples_path=str(samples_path),
+            split=args.split,
+            image_size=dataset_cfg["image_size"],
+        )
+
     loader = DataLoader(ds, batch_size=1, shuffle=False, num_workers=0)
 
+    all_stats: list[dict[str, Any]] = []
     count = 0
     for batch in loader:
         if count >= args.max_samples:
             break
 
         with torch.no_grad():
-            logits = forward_sam(
-                sam,
-                batch["image"],
-                batch["box_prompt"],
-                batch["point_prompt"],
-                batch["point_label"],
-                device,
-            )
+            if use_cached:
+                logits = forward_sam_cached(
+                    sam,
+                    batch["image_embedding"],
+                    batch["box_prompt"],
+                    batch["point_prompt"],
+                    batch["point_label"],
+                    device,
+                )
+            else:
+                logits = forward_sam(
+                    sam,
+                    batch["image"],
+                    batch["box_prompt"],
+                    batch["point_prompt"],
+                    batch["point_label"],
+                    device,
+                )
+
+        target = batch["target_mask"].to(device)
+        ignore = batch["ignore_mask"].to(device)
+        box_prompt = batch["box_prompt"].to(device)
+
+        target_r = torch.nn.functional.interpolate(target, size=logits.shape[2:], mode="nearest")
+        ignore_r = torch.nn.functional.interpolate(ignore, size=logits.shape[2:], mode="nearest")
 
         pred = torch.sigmoid(logits[:, 0:1]) > 0.5
         pred_resized = torch.nn.functional.interpolate(
@@ -261,31 +338,116 @@ def main(argv: list[str] | None = None) -> None:
             mode="nearest",
         ).squeeze()
 
-        image_np = (batch["image"].squeeze().cpu().numpy().transpose(1, 2, 0) * 255).astype(
-            np.uint8
-        )
+        if use_cached:
+            img_path = dataset_root / batch["image_path"][0]
+            from PIL import Image as PilImage
+
+            img_pil = PilImage.open(str(img_path)).convert("RGB")
+            img_pil = img_pil.resize(
+                (dataset_cfg["image_size"], dataset_cfg["image_size"]),
+                PilImage.BILINEAR,
+            )
+            image_np = np.array(img_pil).astype(np.uint8)
+        else:
+            image_np = (batch["image"].squeeze().cpu().numpy().transpose(1, 2, 0) * 255).astype(
+                np.uint8
+            )
         target_np = batch["target_mask"].squeeze().cpu().numpy()
         ignore_np = batch["ignore_mask"].squeeze().cpu().numpy()
         pred_np = pred_resized.cpu().numpy()
         box = batch["box_prompt"].squeeze().cpu().tolist()
         point = batch["point_prompt"].squeeze().cpu().tolist()
 
-        sample_id = (
-            batch["sample_id"][0]
-            if isinstance(batch["sample_id"], (list, torch.Tensor))
-            else batch["sample_id"]
+        sample_ids = _get_sample_ids(batch)
+        sid = sample_ids[0] if sample_ids else f"sample_{count}"
+
+        target_ncc = count_connected_components(target_np)
+        if target_ncc > 1:
+            logger.warning(
+                "Target mask has %d components for sample_id=%s (expected 1)",
+                target_ncc,
+                sid,
+            )
+
+        stats = compute_prediction_stats(
+            logits[:, 0:1], target_r, ignore_r, box_prompt, sample_ids
         )
+        all_stats.extend(stats)
+
+        s = stats[0] if stats else {}
 
         overlay = draw_overlay(
-            image_np, target_np, pred_np, ignore_np, box, point, sample_id=sample_id
+            image_np,
+            target_np,
+            pred_np,
+            ignore_np,
+            box,
+            point,
+            sample_id=sid,
+            iou=s.get("iou", 0.0),
+            dice=s.get("dice", 0.0),
+            gt_positive_pixels=s.get("gt_positive_pixels", 0),
+            pred_positive_pixels=s.get("pred_positive_pixels_threshold_0_5", 0),
+            pred_prob_max=s.get("pred_probability_max", 0.0),
+            target_n_components=target_ncc,
         )
-        out_path = output_dir / f"{sample_id}_overlay.png"
+
+        out_path = output_dir / f"{sid}_overlay.png"
         overlay.save(str(out_path))
-        logger.info("Saved overlay: %s", out_path)
+        logger.info(
+            "Saved overlay: %s (IoU=%.4f Dice=%.4f)", out_path, s.get("iou", 0), s.get("dice", 0)
+        )
 
         count += 1
 
+    stats_path = output_dir / f"prediction_stats_{args.split}.jsonl"
+    with open(stats_path, "w") as f:
+        for entry in all_stats:
+            f.write(json.dumps(entry) + "\n")
+    logger.info("Saved prediction stats: %s", stats_path)
+
+    if all_stats:
+        aggregates = {
+            "mean_iou": sum(s["iou"] for s in all_stats) / len(all_stats),
+            "mean_dice": sum(s["dice"] for s in all_stats) / len(all_stats),
+            "mean_gt_positive_pixels": sum(s["gt_positive_pixels"] for s in all_stats)
+            / len(all_stats),
+            "mean_pred_positive_pixels": sum(
+                s["pred_positive_pixels_threshold_0_5"] for s in all_stats
+            )
+            / len(all_stats),
+            "mean_prediction_area_ratio": sum(s["prediction_area_ratio"] for s in all_stats)
+            / len(all_stats),
+            "mean_target_area_ratio": sum(s["target_area_ratio"] for s in all_stats)
+            / len(all_stats),
+        }
+        agg_path = output_dir / f"prediction_stats_{args.split}_aggregate.json"
+        with open(agg_path, "w") as f:
+            json.dump(aggregates, f, indent=2)
+        logger.info(
+            "Aggregate IoU: %.4f  Dice: %.4f", aggregates["mean_iou"], aggregates["mean_dice"]
+        )
+
     logger.info("Done. Saved %d overlays to %s", count, output_dir)
+
+
+def _get_sample_ids(batch: dict[str, Any]) -> list[str]:
+    """Extract sample IDs from a batch.
+
+    Args:
+        batch: Batch dictionary from the data loader.
+
+    Returns:
+        List of sample ID strings.
+    """
+    sid = batch.get("sample_id", [])
+    if isinstance(sid, str):
+        return [sid]
+    if isinstance(sid, torch.Tensor):
+        return sid.tolist()
+    if isinstance(sid, list):
+        return sid
+    return [f"unknown_{i}" for i in range(batch.get("target_mask", torch.tensor([0])).shape[0])]
 
 
 if __name__ == "__main__":
