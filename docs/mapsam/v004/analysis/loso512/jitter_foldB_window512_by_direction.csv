@@ -1,0 +1,2 @@
+arm,window_px,jitter_prompts,offset_px,direction,n,mean_abs_error_source_px,mean_gt_area_source_px,mean_iou,iou_ge_0_5_rate,zero_iou_rate,zero_prediction_rate
+foldB_window512,512,True,0,none,34,91.76470588235294,470.3529411764706,0.8261454117647059,1.0,0.0,0.0

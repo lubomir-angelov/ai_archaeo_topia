@@ -10,6 +10,7 @@ from PIL import Image
 from archeo_topia.datasets.mapsam_dataset import MapSamDataset
 from archeo_topia.datasets.mapsam_window import (
     Window,
+    apply_prompt_jitter,
     bbox_into_window,
     compute_window,
     crop_to_window,
@@ -258,3 +259,83 @@ class TestDatasetWindowing:
         assert torch.equal(first["image"], second["image"])
         assert torch.equal(first["target_mask"], second["target_mask"])
         assert first["sample_id"] == second["sample_id"]
+
+
+class TestApplyPromptJitter:
+    BBOX = (116.0, 106.0, 125.0, 115.0)
+    CENTER = (120.0, 110.0)
+
+    def test_no_jitter_returns_the_ground_truth_prompt(self):
+        window_c, prompt_c, bbox = apply_prompt_jitter(
+            self.CENTER, self.BBOX, (IMAGE_H, IMAGE_W), None
+        )
+        assert window_c == self.CENTER
+        assert prompt_c == self.CENTER
+        assert bbox == self.BBOX
+
+    def test_jitter_moves_window_point_and_box_together(self):
+        window_c, prompt_c, bbox = apply_prompt_jitter(
+            self.CENTER, self.BBOX, (IMAGE_H, IMAGE_W), (30.0, -20.0)
+        )
+        assert window_c == (150.0, 90.0)
+        assert prompt_c == (150.0, 90.0)
+        assert bbox == (146.0, 86.0, 155.0, 95.0)
+
+    def test_control_arm_moves_only_the_window(self):
+        window_c, prompt_c, bbox = apply_prompt_jitter(
+            self.CENTER, self.BBOX, (IMAGE_H, IMAGE_W), (30.0, -20.0), jitter_prompts=False
+        )
+        assert window_c == (150.0, 90.0)
+        assert prompt_c == self.CENTER
+        assert bbox == self.BBOX
+
+    @pytest.mark.parametrize("offset", [(500.0, 0.0), (-500.0, 0.0), (0.0, 500.0), (0.0, -500.0)])
+    def test_prompts_stay_inside_the_image(self, offset):
+        window_c, prompt_c, bbox = apply_prompt_jitter(
+            self.CENTER, self.BBOX, (IMAGE_H, IMAGE_W), offset
+        )
+        for x, y in (window_c, prompt_c, (bbox[0], bbox[1]), (bbox[2], bbox[3])):
+            assert 0.0 <= x <= IMAGE_W
+            assert 0.0 <= y <= IMAGE_H
+        assert bbox[2] > bbox[0] and bbox[3] > bbox[1]
+
+
+class TestDatasetPromptJitter:
+    def test_jitter_displaces_the_window_but_not_the_target(self, tmp_path):
+        manifest = _write_dataset(tmp_path, [(120, 110)], (120, 110))
+        kwargs = dict(image_size=128, window_px=60)
+        base = MapSamDataset(tmp_path, manifest, "train", **kwargs)[0]
+        jittered = MapSamDataset(
+            tmp_path, manifest, "train", prompt_jitter_xy=(20.0, 0.0), **kwargs
+        )[0]
+        assert jittered["window_xyxy"][0] - base["window_xyxy"][0] == 20.0
+        # The mound is still the one the annotation points at; only the prompt
+        # and the input window moved.
+        assert jittered["target_mask"].sum() == base["target_mask"].sum()
+
+    def test_control_arm_keeps_the_prompt_on_the_target(self, tmp_path):
+        manifest = _write_dataset(tmp_path, [(120, 110)], (120, 110))
+        sample = MapSamDataset(
+            tmp_path,
+            manifest,
+            "train",
+            image_size=128,
+            window_px=60,
+            prompt_jitter_xy=(20.0, 0.0),
+            jitter_prompts=False,
+        )[0]
+        px, py = (int(round(v)) for v in sample["point_prompt"].tolist())
+        assert sample["target_mask"][0, py, px] > 0.5
+
+    def test_jittered_prompt_leaves_the_target(self, tmp_path):
+        manifest = _write_dataset(tmp_path, [(120, 110)], (120, 110))
+        sample = MapSamDataset(
+            tmp_path,
+            manifest,
+            "train",
+            image_size=128,
+            window_px=60,
+            prompt_jitter_xy=(20.0, 0.0),
+        )[0]
+        px, py = (int(round(v)) for v in sample["point_prompt"].tolist())
+        assert sample["target_mask"][0, py, px] == 0.0

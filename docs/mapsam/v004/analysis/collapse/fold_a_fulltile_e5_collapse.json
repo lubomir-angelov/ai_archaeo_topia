@@ -1,0 +1,16 @@
+{
+  "config": "configs/mapsam/mapsam_v0_3_loso_foldA_pw20_cropon.yaml",
+  "checkpoint": "artifacts/models/mapsam/v0_3_loso_foldA_pw20_cropon/checkpoints/epoch_5.pt",
+  "window_px": null,
+  "summary": {
+    "n": 120,
+    "near_threshold_px": 40.0,
+    "mean_iou": 0.491054,
+    "n_zero_iou": 2,
+    "n_zero_prediction": 0,
+    "n_near_miss": 2,
+    "n_wrong_object": 0,
+    "median_near_miss_distance_source_px": 16.805,
+    "median_hit_centroid_distance_source_px": 5.59
+  }
+}

@@ -1,0 +1,63 @@
+# v0.4 step 3: leave-one-sheet-out at the 512 px prompt-centred window.
+# The v0.3 resolution arms were all evaluated on K-35-8-G-a, so they showed
+# that 512 improves segmentation on the easy sheet, not that it narrows the
+# cross-sheet gap.  This repeats the v0.3 full-tile LOSO protocol with the
+# window as the only change, so the two tables are directly comparable.
+#
+# Differences from mapsam_v0_3_loso_foldB_pw20_cropon.yaml:
+#   dataset.window_px          unset -> 512
+#   loss.bbox_loss_crop_margin 32 -> 150  (holds the supervised ground area
+#                                          near-constant at ~300 source px)
+#   model.use_cached_embeddings true -> false  (the cache is per image tile;
+#                                          a window makes the input per sample)
+experiment_name: mapsam_v0_4_loso512_foldB_pw20
+
+dataset:
+  root: data/curated/datasets/mapsam_v02
+  samples: metadata/training_samples.jsonl
+  image_size: 1024
+  num_workers: 2
+  val_split: test
+  window_px: 512
+  train_sheets:
+    - K-34-35-B-g
+    - K-35-51-B-a
+  eval_sheets:
+    - K-35-8-G-a
+
+model:
+  model_type: vit_b
+  sam_checkpoint: models/checkpoints/sam/sam_vit_b_01ec64.pth
+  freeze_image_encoder: true
+  train_prompt_encoder: false
+  train_mask_decoder: true
+  use_cached_embeddings: false
+
+training:
+  epochs: 50
+  batch_size: 1
+  learning_rate: 0.0001
+  weight_decay: 0.01
+  device: cuda
+  seed: 42
+  save_every_epochs: 5
+  validate_every_epochs: 5
+  max_train_batches: null
+  max_val_batches: null
+
+loss:
+  bce_weight: 0.5
+  dice_weight: 2.0
+  eps: 0.000001
+  foreground_bce_pos_weight: 20.0
+  use_bbox_loss_crop: true
+  bbox_loss_crop_margin: 150
+
+debug:
+  overfit_mode: false
+  log_prediction_stats: true
+
+outputs:
+  root: artifacts/models/mapsam/v0_4_loso512_foldB_pw20
+  save_debug_predictions: true
+  debug_prediction_count: 8

@@ -1,0 +1,130 @@
+{
+  "arm": "window512_gtprompt",
+  "config": "configs/mapsam/mapsam_v0_3_res_c_window512_pw20.yaml",
+  "checkpoint": "artifacts/models/mapsam/v0_3_res_c_window512_pw20/checkpoints/final.pt",
+  "split": "test",
+  "window_px": 512,
+  "jitter_prompts": false,
+  "by_offset": [
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 0,
+      "n_directions": 1,
+      "mean_abs_error_source_px": 91.76470588235294,
+      "mean_gt_area_source_px": 470.3529411764706,
+      "mean_iou": 0.8261454117647059,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 91.76470588235294
+    },
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 5,
+      "n_directions": 8,
+      "mean_abs_error_source_px": 96.82352941176471,
+      "mean_gt_area_source_px": 470.86764705882354,
+      "mean_iou": 0.8176682757352941,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 99.52941176470588
+    },
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 10,
+      "n_directions": 8,
+      "mean_abs_error_source_px": 95.5,
+      "mean_gt_area_source_px": 470.52941176470586,
+      "mean_iou": 0.8207344632352941,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 99.52941176470588
+    },
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 15,
+      "n_directions": 8,
+      "mean_abs_error_source_px": 96.80882352941177,
+      "mean_gt_area_source_px": 471.04411764705884,
+      "mean_iou": 0.8186901617647059,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 104.0
+    },
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 25,
+      "n_directions": 8,
+      "mean_abs_error_source_px": 98.38235294117646,
+      "mean_gt_area_source_px": 470.9558823529412,
+      "mean_iou": 0.8173114852941177,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 111.76470588235294
+    },
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 50,
+      "n_directions": 8,
+      "mean_abs_error_source_px": 106.22058823529412,
+      "mean_gt_area_source_px": 470.4705882352941,
+      "mean_iou": 0.8052052132352941,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 127.29411764705883
+    },
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 100,
+      "n_directions": 8,
+      "mean_abs_error_source_px": 100.6470588235294,
+      "mean_gt_area_source_px": 470.5294117647059,
+      "mean_iou": 0.8124398897058823,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 109.05882352941177
+    },
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 200,
+      "n_directions": 8,
+      "mean_abs_error_source_px": 100.92647058823529,
+      "mean_gt_area_source_px": 470.30882352941177,
+      "mean_iou": 0.8090940808823529,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 113.52941176470588
+    },
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 250,
+      "n_directions": 8,
+      "mean_abs_error_source_px": 94.16176470588235,
+      "mean_gt_area_source_px": 432.19117647058823,
+      "mean_iou": 0.8030655625,
+      "iou_ge_0_5_rate": 1.0,
+      "zero_iou_rate": 0.0,
+      "zero_prediction_rate": 0.0,
+      "worst_direction_abs_error_source_px": 111.76470588235294
+    },
+    {
+      "arm": "window512_gtprompt",
+      "offset_px": 300,
+      "n_directions": 8,
+      "mean_abs_error_source_px": 91.27941176470588,
+      "mean_gt_area_source_px": 291.0,
+      "mean_iou": 0.4958476176470588,
+      "iou_ge_0_5_rate": 0.6213235294117647,
+      "zero_iou_rate": 0.3786764705882353,
+      "zero_prediction_rate": 0.051470588235294115,
+      "worst_direction_abs_error_source_px": 147.05882352941177
+    }
+  ]
+}
