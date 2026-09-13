@@ -1071,6 +1071,38 @@ def save_checkpoint(
     torch.save(payload, str(path))
 
 
+def build_metrics_record(
+    epoch: int,
+    train_metrics: dict[str, Any],
+    val_metrics: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Build one epoch's entry for ``metrics.json``.
+
+    Per-sample rows are dropped from both the train and val blocks: they are
+    written to the ``prediction_stats_*.jsonl`` files instead.  Keeping a
+    second copy here made metrics.json 19 MB for a 200-epoch run, 12.9 MB of
+    which was the val rows alone, for a file whose point is the epoch curves.
+    The ``prediction_stats_aggregate`` summaries are kept.
+
+    Args:
+        epoch: Epoch number (1-indexed).
+        train_metrics: Metrics returned by the training pass.
+        val_metrics: Metrics returned by the validation pass, or ``None``
+            when the epoch was not validated.
+
+    Returns:
+        The record to append to the metrics history.
+    """
+    drop = "prediction_stats"
+    return {
+        "epoch": epoch,
+        "train": {k: v for k, v in train_metrics.items() if k != drop},
+        "val": (
+            {k: v for k, v in val_metrics.items() if k != drop} if val_metrics else val_metrics
+        ),
+    }
+
+
 def _state_dict_bytes(state: dict[str, torch.Tensor]) -> int:
     """Total size in bytes of the tensors in a state dict.
 
@@ -1468,11 +1500,7 @@ def main(argv: list[str] | None = None) -> None:
                     include_optimizer=True,
                 )
 
-        record = {
-            "epoch": epoch,
-            "train": {k: v for k, v in train_metrics.items() if k != "prediction_stats"},
-            "val": val_metrics,
-        }
+        record = build_metrics_record(epoch, train_metrics, val_metrics)
         metrics_history.append(record)
 
         if log_stats and "prediction_stats" in train_metrics:
