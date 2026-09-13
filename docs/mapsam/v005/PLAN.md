@@ -5,6 +5,15 @@ Written at the end of v0.4, revised after a data audit against
 first; this plan assumes its findings and does not repeat the evidence for
 them.
 
+> **Status.** Steps 2, 3 and 4 are executed; see `RESULTS.md`. Step 5 is
+> implemented and unrun. Steps 6 and 7 did not trigger: the detector's p90
+> centre error is 2.0–3.7 px on every fold, inside the working band, and its
+> false-positive rate is 0.00–0.21 per window, so neither a second-stage
+> filter nor jitter augmentation has a problem to solve. Step 1 remains the
+> binding constraint, and the open question is now detection **recall** on a
+> sheet whose mounds print without their usual companion glyph — not
+> localization, which the results show is solved.
+
 **v0.5 changes what the project is working on.** v0.1–v0.4 asked *"given the
 correct mound location, can MapSAM segment it?"* That question is answered
 well enough on the data available. v0.5 asks *"can the system find mounds?"*,
