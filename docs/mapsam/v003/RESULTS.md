@@ -11,11 +11,12 @@ invalidates a number in the v0.2 report.
 
 ## Summary
 
-1. **v0.2 does not generalize across sheets.** The 0.6876 in `../v002/RESULTS.md`
-   came from the easiest of the three sheets. The other two score 0.35–0.42
-   with the same recipe.
+1. **v0.2 does not generalize *consistently* across sheets.** The 0.6876 in
+   `../v002/RESULTS.md` came from the easiest of the three sheets. The other two
+   score 0.35–0.42 with the same recipe. This is large cross-sheet degradation,
+   not a failure to transfer: 0.35 still carries real signal.
 2. **Target size does not limit accuracy — the metric made it look like it did.**
-   Absolute boundary error is flat across every target-size bucket. Small
+   Absolute mask disagreement area is flat across every target-size bucket. Small
    targets score worse IoU only because the denominator is smaller.
 3. **Prompt-centred windows nevertheless help, and substantially.** Absolute
    error per mound falls 64% from full tile to a 512 px window. This is a real
@@ -62,8 +63,11 @@ exactly: `pw20_cropon` final 0.6021 / peak 0.6689 @ e5, `pw200_cropoff` peak
 | K-35-51-B-a | 120 | 51  | 0.3498 | 0.4911 @ e5 |
 | K-34-35-B-g | 17  | 154 | 0.3714 | 0.5234 @ e15 |
 
-Mean across folds: **0.441**, against the 0.6689 v0.2 reported from
-`K-35-8-G-a` alone. That sheet is the easiest of the three.
+Macro mean across sheets: **0.441**, against the 0.6689 v0.2 reported from
+`K-35-8-G-a` alone. That sheet is the easiest of the three. The sample-weighted
+mean is **0.402** — lower, because the 120-sample sheet is one of the hard ones.
+Macro is the right figure when the question is robustness across map domains;
+both should be reported once more sheets exist.
 
 The three folds train on 51 / 137 / 154 samples, so sheet difficulty is
 confounded with training-set size. The size-matched arm pins every fold to 51:
@@ -89,7 +93,7 @@ untested. Fold C evaluates on 17 samples, where one sample moves the score by
 **Not in absolute terms.** On the 137-sample train split, bucketing by GT
 pixels at the 256 decoder looks damning at first:
 
-| GT size | n | mean IoU | **mean abs error** |
+| GT size | n | mean IoU | **mean disagreement area** |
 |---|---:|---:|---:|
 | 1–3 px | 16 | 0.508 | **2.88 px** |
 | 4–5 px | 56 | 0.756 | **2.00 px** |
@@ -98,9 +102,9 @@ pixels at the 256 decoder looks damning at first:
 
 The last column is the finding. Symmetric difference — the count of pixels
 where prediction and truth disagree — is **flat**, and if anything grows with
-target size. The model makes the same ~2 px boundary error on a 3 px mound as
-on a 12 px one. IoU falls on small targets purely because that constant error
-is divided by a smaller denominator. Size-vs-absolute-error Spearman across the
+target size. The model disagrees with truth over the same ~2 px of area on a
+3 px mound as on a 12 px one. IoU falls on small targets purely because that constant
+disagreement is divided by a smaller denominator. Size-vs-disagreement-area Spearman across the
 four v0.2 runs: −0.005 to +0.20.
 
 This also means Pearson correlation, which v0.3 originally specified, is the
@@ -111,6 +115,12 @@ The held-out sheet cannot answer this question at all — 33 of its 34 samples
 fall in 4–8 px, so its correlations swing from −0.03 to +0.59 across configs on
 pure range restriction.
 
+Terminology: the quantity called *disagreement area* here is the symmetric
+difference |pred XOR gt| measured in pixels of area. It is not a boundary
+displacement — a 2 px symmetric difference does not imply a boundary shifted by
+2 px. If boundary displacement is ever the question, that needs a boundary
+metric such as boundary F-score or average surface distance.
+
 Artifacts: `docs/mapsam/v003/analysis/train/`, `.../heldout/`.
 
 ## Question 3 — does prompt-centred cropping improve performance?
@@ -120,7 +130,7 @@ optimizer, learning rate, epochs, loss and positive weight are identical. The
 loss-crop margin is scaled per arm (32 / 75 / 150 at 256 logits) so the
 supervised ground area stays at ~300 source px in all three.
 
-| Arm | window | decoder IoU | **abs error (source px²)** | GT area (source px²) | encoder tokens |
+| Arm | window | decoder IoU | **disagreement area (source px²)** | GT area (source px²) | encoder tokens |
 |---|---|---:|---:|---:|---:|
 | A full tile | ~2300 px | 0.6021 | **253.9** | 479.0 | 0.61 |
 | B medium | 1024 px | 0.7567 | **135.5** | 470.6 | 1.36 |
@@ -177,8 +187,16 @@ weight — `pw20` saturates too (31/34 samples hit exactly 1.0). Windowing makes
 it worse (34/34, logits to 88).
 
 **Do not use max probability as confidence.** Mean probability inside the GT
-region (0.74–0.93) does vary usefully and is the better candidate if a
-confidence signal is needed later. No calibration attempted.
+region (0.74–0.93) does vary usefully, but it is an *evaluation diagnostic
+only* — the GT region is unknown at inference, so it cannot serve as a
+deployment confidence signal.
+
+Candidates that are available at inference, for later investigation: SAM's own
+mask-quality head (`sam.mask_decoder` returns `iou_predictions` as its second
+value, currently discarded at `train_mapsam_v0.py:372` and `:431`); mean or
+lower-quantile probability inside the *predicted* mask; logit margin near the
+predicted boundary; and stability of the mask under small prompt
+perturbations. No calibration attempted.
 
 ---
 
