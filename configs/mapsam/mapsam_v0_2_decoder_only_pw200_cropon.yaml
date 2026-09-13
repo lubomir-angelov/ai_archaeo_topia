@@ -1,4 +1,4 @@
-experiment_name: mapsam_v0_2_decoder_only_cropoff
+experiment_name: mapsam_v0_2_decoder_only_pw200_cropon
 
 dataset:
   root: data/curated/datasets/mapsam_v02
@@ -32,7 +32,7 @@ loss:
   dice_weight: 2.0
   eps: 0.000001
   foreground_bce_pos_weight: 200.0
-  use_bbox_loss_crop: false
+  use_bbox_loss_crop: true
   bbox_loss_crop_margin: 32
 
 debug:
@@ -40,6 +40,6 @@ debug:
   log_prediction_stats: true
 
 outputs:
-  root: artifacts/models/mapsam/v0_2_decoder_only_cropoff
+  root: artifacts/models/mapsam/v0_2_decoder_only_pw200_cropon
   save_debug_predictions: true
   debug_prediction_count: 8
