@@ -64,7 +64,12 @@ from archeo_topia.analysis.detection_metrics import (
     load_annotations,
     merge_detections,
 )
-from archeo_topia.datasets.build_detection_windows import FOLDS, decode_mask, find_image
+from archeo_topia.datasets.build_detection_windows import (
+    FOLDS,
+    MOUND,
+    decode_mask,
+    find_image,
+)
 from archeo_topia.datasets.mapsam_window import compute_window
 
 logger = logging.getLogger(__name__)
@@ -273,9 +278,15 @@ def run_fold(
     with open(coco_json, encoding="utf-8") as handle:
         coco = json.load(handle)
     images = {i["id"]: i for i in coco["images"]}
+    # Match the positive category by name. Category ids are assigned by the
+    # exporter and are not stable across re-exports, so a hardcoded id here
+    # would silently select the wrong class after a relabel.
+    mound_ids = {c["id"] for c in coco["categories"] if c["name"] == MOUND}
+    if not mound_ids:
+        raise ValueError(f"no {MOUND!r} category in {coco_json}")
     truth_masks: dict[int, np.ndarray] = {}
     for ann in coco["annotations"]:
-        if ann["category_id"] != 1:
+        if ann["category_id"] not in mound_ids:
             continue
         meta = images[ann["image_id"]]
         if meta["file_name"].rsplit("_", 1)[0] != eval_sheet:
