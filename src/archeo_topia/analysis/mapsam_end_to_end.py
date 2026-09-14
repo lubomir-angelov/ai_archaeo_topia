@@ -84,14 +84,23 @@ BOX_PADDING = 4.0
 IOU_THRESHOLDS = (0.5, 0.75)
 
 
-def load_mapsam(fold: str, mapsam_root: Path, sam_checkpoint: Path, device: torch.device) -> Any:
+def load_mapsam(
+    fold: str,
+    mapsam_root: Path,
+    sam_checkpoint: Path,
+    device: torch.device,
+    run_prefix: str = "v0_4r_loso512",
+) -> Any:
     """Load the v0.4 512-window decoder for one fold.
 
     Args:
         fold: Fold name.
-        mapsam_root: Root holding the ``v0_4_loso512_*`` run directories.
+        mapsam_root: Root holding the decoder run directories.
         sam_checkpoint: Base SAM ViT-B checkpoint the decoder was trained on.
         device: Target device.
+        run_prefix: Run-directory prefix. Defaults to the v0.4 revision trained
+            on the corrected annotations; pass ``v0_4_loso512`` to use the
+            original checkpoints instead.
 
     Returns:
         The SAM model in eval mode.
@@ -101,7 +110,7 @@ def load_mapsam(fold: str, mapsam_root: Path, sam_checkpoint: Path, device: torc
     """
     from archeo_topia.training.train_mapsam_v0 import build_sam_model, load_checkpoint
 
-    checkpoint = mapsam_root / f"v0_4_loso512_{fold}_pw20" / "checkpoints" / "final.pt"
+    checkpoint = mapsam_root / f"{run_prefix}_{fold}_pw20" / "checkpoints" / "final.pt"
     if not checkpoint.exists():
         raise FileNotFoundError(f"MapSAM checkpoint not found: {checkpoint}")
 
@@ -239,6 +248,7 @@ def run_fold(
     image_size: int,
     merge_radius: float,
     device: torch.device,
+    mapsam_prefix: str = "v0_4r_loso512",
 ) -> dict[str, Any]:
     """Run the full pipeline for one fold and score it.
 
@@ -257,6 +267,7 @@ def run_fold(
         image_size: Encoder input size.
         merge_radius: Cross-window deduplication radius.
         device: Target device.
+        mapsam_prefix: Decoder run-directory prefix.
 
     Returns:
         Metrics for the fold, one block per prompt arm.
@@ -295,7 +306,7 @@ def run_fold(
         if mask.any():
             truth_masks[ann["id"]] = mask
 
-    sam = load_mapsam(fold, mapsam_root, sam_checkpoint, device)
+    sam = load_mapsam(fold, mapsam_root, sam_checkpoint, device, mapsam_prefix)
 
     clips: dict[str, torch.Tensor] = {}
     for name in sorted({c.image for c in candidates} | {a.image for a in scorable}):
@@ -409,6 +420,7 @@ def main() -> None:
     parser.add_argument("--window-px", type=int, default=512)
     parser.add_argument("--image-size", type=int, default=1024)
     parser.add_argument("--merge-radius", type=float, default=10.0)
+    parser.add_argument("--mapsam-prefix", default="v0_4r_loso512")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
@@ -435,6 +447,7 @@ def main() -> None:
                 image_size=args.image_size,
                 merge_radius=args.merge_radius,
                 device=device,
+                mapsam_prefix=args.mapsam_prefix,
             )
         )
 

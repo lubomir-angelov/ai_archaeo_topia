@@ -1,8 +1,7 @@
 # MapSAM v0.5 — first detector, and a ground-truth error it exposed
 
-Executes steps 2, 3 and 4 of `PLAN.md`. Step 5 (end-to-end through the frozen
-512 decoder) is written and blocked on an install; steps 1, 6, 7 and 8 were not
-attempted. See *What was not done* at the end.
+Executes steps 2, 3, 4 and 5 of `PLAN.md`. Steps 1, 6, 7 and 8 were not
+attempted; 6 and 7 did not trigger. See *What was not done* at the end.
 
 **This document reports two experiments, not one.** They differ only in the
 annotations they were trained and evaluated against:
@@ -305,6 +304,82 @@ Per-fold detail: `analysis/detector/` and `analysis/template/`.
 
 ---
 
+# Step 5 — end-to-end, detector to mask
+
+The first measurement in this project that is not conditional on already
+knowing where the mound is. Detector candidates at confidence 0.25 from
+experiment 2, prompts derived from them, masks from the **v0.4r** decoder —
+the 512 px LOSO checkpoints retrained on the corrected annotations, see
+`../v004/RESULTS_REVISION.md` — scored against each annotation's own geometry.
+
+Two prompt arms separate two error sources. `fixed` puts a median-sized box
+(25×23 px, 4 px padding) on the candidate centre, so only localization error
+reaches the segmenter. `detector` uses the candidate's own box, which is what
+deployment does. v0.4's jitter sweep translated the ground-truth box rigidly
+and left box *scale* untested; this is that measurement.
+
+| fold | sheet | arm | n | IoU≥0.5 | IoU≥0.75 | mean IoU | missed | false masks |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| A | K-35-51-B-a | `fixed` | 128 | 0.875 | 0.586 | 0.6820 | 0.109 | 60 |
+| A | K-35-51-B-a | `detector` | 128 | 0.883 | 0.570 | 0.6776 | 0.109 | 60 |
+| B | K-35-8-G-a | `fixed` | 34 | 1.000 | 0.529 | 0.7482 | 0.000 | 0 |
+| B | K-35-8-G-a | `detector` | 34 | 1.000 | 0.471 | 0.7455 | 0.000 | 0 |
+| C | K-34-35-B-g | `fixed` | 7 | 1.000 | 0.857 | 0.7717 | 0.000 | 3 |
+| C | K-34-35-B-g | `detector` | 7 | 1.000 | 0.571 | 0.7779 | 0.000 | 3 |
+
+**Macro IoU≥0.5 is 0.958** on the `fixed` arm. Every mound the detector finds
+on the two smaller sheets yields a usable mask.
+
+## The end-to-end loss is detector recall, not segmentation
+
+This is what the step was built to test, and it separates cleanly:
+
+| fold | mean IoU, all annotations | mean IoU, found only | v0.4r conditional (GT prompt) | prompt cost |
+|---|---:|---:|---:|---:|
+| A | 0.6820 | 0.7657 | 0.7913 | −0.026 |
+| B | 0.7482 | 0.7482 | 0.8288 | −0.081 |
+| C | 0.7717 | 0.7717 | 0.8137 | −0.042 |
+
+Fold A's missed rate is 0.109 against a detector miss rate of 0.117 at the same
+threshold: **the pipeline loses what the detector misses and essentially
+nothing else.** Fold B is the cleanest case — 34 of 34 found, so no recall loss
+at all — and it isolates the cost of a detector-derived prompt against a
+ground-truth one at 0.081 IoU, with a measured p90 centre error of 3.66 px.
+
+That cost is real but modest, and it is in the direction v0.4's tolerance curve
+predicts. It is also not purely localization: the `fixed` arm's box is the
+dataset median, and symbol boxes run 8–33 px, so part of the 0.081 is box-scale
+mismatch rather than centre error.
+
+## Box scale costs mask precision, not mask detection
+
+The `fixed` arm beats the `detector` arm at IoU≥0.75 on all three folds:
+
+| fold | fixed | detector | Δ |
+|---|---:|---:|---:|
+| A (n=128) | 0.586 | 0.570 | +0.016 |
+| B (n=34) | 0.529 | 0.471 | +0.059 |
+| C (n=7) | 0.857 | 0.571 | +0.286 |
+
+At IoU≥0.5 and in mean IoU the two arms are within 0.006 of each other. So the
+detector's own box costs *precision* of the mask, not whether a usable mask is
+produced at all.
+
+The direction is consistent on 3 of 3 folds, but the magnitudes are not strong
+evidence: fold A's +0.016 is two instances out of 128, and fold C's +0.286 is
+6/7 against 4/7. Treat it as a cheap default worth adopting — prompt with a
+canonical box on the detector's point rather than the detector's box — and not
+as an established effect. A proper test would size the box from the predicted
+symbol rather than from the dataset median.
+
+## False masks
+
+60 on fold A, 0 on fold B, 3 on fold C, at confidence 0.25. These are the
+detector's false positives carried through segmentation, and as noted below
+they are a review queue rather than purely an error count.
+
+---
+
 ## What this does and does not establish
 
 It is **within-series detection on three sheets of one Soviet 1:50k series**,
@@ -345,14 +420,6 @@ probably genuine errors, but the 61 on `background` have not been inspected.
 **Step 1 (more sheets)** — unchanged, and now the only thing standing between
 this and a defensible robustness claim.
 
-**Step 5 (end-to-end through MapSAM)** — implemented in
-`src/archeo_topia/analysis/mapsam_end_to_end.py`, not run. `segment-anything`
-and `scipy` are absent from the project virtualenv; the v0.4 fold checkpoints
-and the base SAM ViT-B checkpoint are present. It runs two prompt arms — a
-fixed median-sized box, which isolates localization error, and the detector's
-own box, which is what deployment does — because v0.4's jitter sweep translated
-the ground-truth box rigidly and left box *scale* untested.
-
 **Step 6 (second-stage classifier)** — not triggered. 0.00–0.36 false positives
 per window at confidence 0.25.
 
@@ -363,17 +430,35 @@ experiments.
 **Step 8 (permanent grouped splits)** — blocked on more sheets; the fold A
 trajectory is a second argument for it.
 
-**v0.4 revision** — deliberately deferred. Twelve of its 171 training samples
-are no longer mounds, so its LOSO figures were computed partly against
-incorrect ground truth and will need either a re-run or an explicit caveat.
-This is scheduled after v0.5 closes.
+**v0.4 revision** — done, in `../v004/RESULTS_REVISION.md`. Its conclusions
+survive the correction: the two folds with unchanged evaluation sets move by
+under 0.003 IoU.
 
-## Known data defect
+## Known data notes
 
-One of the twelve relabelled symbols, `K-34-35-B-g_3` at (1566, 1103), exported
-with `negative_type` `__undefined__` where the other eleven carry `other`. It
-affects only the attribution of false positives in reporting, not training or
-any figure above, and is left for the next export.
+**The `negative_type` patch.** One of the twelve relabelled symbols,
+`K-34-35-B-g_3` at (1566, 1103), exported with `negative_type`
+`__undefined__` where the other eleven carry `other`. It was corrected
+mechanically in the repository copy rather than by re-exporting from CVAT, so
+`annotation/cvat/v0.0.2/instances_default.json` differs from the CVAT export by
+exactly that one field. No figure in this document changes: `negative_type` is
+used only to attribute false positives, and none were attributed to it.
+
+**A domain rule that predicts the error.** A mound cannot be crossed by a water
+line — water runs along terrain lows and a mound is a raised feature — so
+`crossed_by_water_line` on a `mound` is a label-error signal. **All twelve**
+relabelled mills carry it. Applying the rule to the corrected export leaves two
+mounds still flagged, on sheets that have had no adversarial review:
+
+| annotation | detector verdict | reading |
+|---|---|---|
+| `K-35-51-B-a_3` (314, 15.5) | not detected; nearest candidate 253 px | rule and model agree; also truncated at the tile edge and flagged blurred |
+| `K-35-8-G-a_1` (955.5, 627.5) | detected at 0.8 px, conf 0.838 | rule and model disagree; carries a trig point and both elevation marks, so more likely a wrong attribute than a wrong label |
+
+The rule is a review flag, not an automatic relabel, and it is one-way: it says
+nothing about symbols not crossed by a water line. The other correlations seen
+on the mills — no relative height mark, crossed by a road — turned out to
+describe that class incidentally and should not be generalized the same way.
 
 ---
 
@@ -396,7 +481,18 @@ python -m archeo_topia.training.train_mound_detector \
   --dataset data/curated/datasets/mapsam_det_v1 \
   --output-dir artifacts/detection/v0_5_yolo26s_gtfix \
   --fold all --model yolo26s.pt --imgsz 512 --epochs 150 --batch 16 --save-period 25
+
+python -m archeo_topia.analysis.mapsam_end_to_end \
+  --dataset data/curated/datasets/mapsam_det_v1 \
+  --detector-run artifacts/detection/v0_5_yolo26s_gtfix \
+  --images-root data/curated/datasets/mapsam_v02/images \
+  --coco-json annotation/cvat/v0.0.2/instances_default.json \
+  --mapsam-prefix v0_4r_loso512 --fold all --confidence 0.25 \
+  --output-dir artifacts/detection/v0_5_end_to_end
 ```
+
+Step 5 needs both optional extras together, `.[sam,detect]`: it spans the
+detector and the decoder.
 
 Environment: torch 2.14.0+cu130, ultralytics 8.4.150, one RTX 5090. v0.1–v0.4
 ran on torch 2.12; the detector work did not re-verify the decoder results
