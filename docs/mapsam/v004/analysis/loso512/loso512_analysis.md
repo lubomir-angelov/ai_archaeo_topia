@@ -73,7 +73,7 @@ full tile was a 47% spread.
 Two things this does **not** show.
 
 It does not show that domain robustness is solved. What it establishes is
-*within-series* consistency: all three sheets are the same Soviet 1:50k
+*within-series* consistency: all three sheets are the same Bulgarian 1:25k
 series, so this revises v0.3's diagnosis of what caused the variation it saw —
 the representation, mostly — without establishing anything about a different
 cartographic source. Cross-cartographic behaviour remains entirely untested,

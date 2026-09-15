@@ -83,7 +83,7 @@ Training-set size is worth a lot on its own — holding the sheet fixed,
 does not explain the ranking: fold C trains on the **most** data (154) and
 still scores 0.3714. Sheet identity dominates.
 
-Caveat: all three sheets are the same Soviet 1:50k series (K-34/K-35), so this
+Caveat: all three sheets are the same Bulgarian 1:25k series (K-34/K-35), so this
 is variation *within* one map series. Genuinely different cartography is
 untested. Fold C evaluates on 17 samples, where one sample moves the score by
 ~6%.
@@ -211,7 +211,7 @@ Ranked next steps:
    is the best of the two tested and is not obviously the limit — token
    coverage is still only 2.76. Worth testing 256 px before settling.
 2. **Add map sheets, and prefer diverse cartography.** This is now the binding
-   constraint. Three sheets from one Soviet series cannot support a conclusion
+   constraint. Three sheets from one series cannot support a conclusion
    about map-domain robustness, and two of the three folds have no
    ignore-mask coverage at all in their evaluation set.
 3. **Establish train / validation / frozen-test splits once there are enough

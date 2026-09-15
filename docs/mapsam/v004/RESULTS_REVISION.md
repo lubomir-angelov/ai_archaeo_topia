@@ -115,7 +115,7 @@ Nothing in v0.4's argument depended on the twelve mislabelled symbols.
 
 ## Scope, unchanged
 
-Still three sheets of one Soviet 1:50k series, still leave-one-sheet-out, still
+Still three sheets of one Bulgarian 1:25k series, still leave-one-sheet-out, still
 no frozen test split, so still development evidence rather than a test result.
 The correction removes a known error; it does not add data or broaden the
 series. And the same review that found twelve errors on one sheet found an

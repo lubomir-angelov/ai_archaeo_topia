@@ -2,6 +2,13 @@
 
 ## Overview
 
+**Series.** These are Bulgarian archival topographic maps at **1:25,000**
+(see `docs/AI_ARCHEO_TOPIA_DMP.md`), georeferenced to EPSG:25835. Sheet ids use
+the Soviet-style nomenclature, where `K-35-51-B-a` denotes the 1:25k quadrant
+of the 1:50k sheet `K-35-51-B`. Earlier drafts of several documents described
+this as a "Soviet 1:50k series", reading the nomenclature as the scale; that
+was wrong and has been corrected throughout.
+
 Dataset for fine-tuning the SAM (Segment Anything Model) mask decoder to segment
 archaeological mound symbols on historical map imagery. Source: manually annotated
 mound polygons from historical topographic maps, converted to binary masks with

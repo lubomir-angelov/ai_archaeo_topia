@@ -236,7 +236,7 @@ That makes candidate generation the binding constraint, and it is what the 530
 `hard_negative_symbol` annotations are for.
 
 **What this claim is scoped to.** *Consistent within-series conditional
-segmentation.* All three sheets are one Soviet 1:50k series, so
+segmentation.* All three sheets are one Bulgarian 1:25k series, so
 cross-cartographic generalization is entirely untested and the residual
 24.7 px² spread may understate it badly. Domain robustness is not solved; what
 is shown is that the dominant term in v0.3's sheet variation was

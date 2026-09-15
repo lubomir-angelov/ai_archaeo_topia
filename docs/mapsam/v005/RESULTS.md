@@ -382,7 +382,7 @@ they are a review queue rather than purely an error count.
 
 ## What this does and does not establish
 
-It is **within-series detection on three sheets of one Soviet 1:50k series**,
+It is **within-series detection on three sheets of one Bulgarian 1:25k series**,
 evaluated leave-one-sheet-out. There is no frozen test split, so all of it is
 development evidence, not a test result.
 

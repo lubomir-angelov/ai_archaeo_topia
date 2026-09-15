@@ -42,7 +42,7 @@ which nothing so far has attempted.
 ### What that is and is not scoped to
 
 It is **consistent within-series conditional segmentation**. All three sheets
-are one Soviet 1:50k series. Cross-cartographic generalization is untested and
+are one Bulgarian 1:25k series. Cross-cartographic generalization is untested and
 the 24.7 px² residual may understate it badly. Nothing in v0.1–v0.4 is a test
 result; all of it, LOSO included, is development evidence.
 
@@ -290,7 +290,7 @@ below, but it still blocks every domain-robustness *claim* the work below
 could make. `data/maps`, `data/georeferenced` and `data/cvat_exports` are
 empty; `data/curated/datasets` holds only `mapsam_v0` and `mapsam_v02`.
 
-Prefer several more sheets from this Soviet 1:50k series **and** several
+Prefer several more sheets from this Bulgarian 1:25k series **and** several
 genuinely different cartographic sources. All of v0.4's variation is within
 one series.
 

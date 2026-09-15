@@ -216,7 +216,7 @@ MapSAM:        ███
 ```
 
 **Scope caveat that must travel with those numbers:** all three sheets are one
-Soviet 1:50k series. This is *within-series conditional* segmentation.
+Bulgarian 1:25k series. This is *within-series conditional* segmentation.
 Cross-cartographic behaviour is untested.
 
 ## Stage 4 — Mask back into source-map coordinates
@@ -475,7 +475,7 @@ Two hard dependencies, one soft:
 1. **A detector with p90 centre error inside ~5 source px.** Everything from
    stage 3 onward is validated and waiting; nothing runs without this.
 2. **More map sheets, and preferably a second cartographic series.** Three
-   sheets of one Soviet 1:50k series cannot support a robustness claim for any
+   sheets of one Bulgarian 1:25k series cannot support a robustness claim for any
    stage. `data/maps`, `data/georeferenced` and `data/cvat_exports` are
    currently empty.
 3. **Georeferencing above 30.5%** — soft, because stage 5 is designed to be
