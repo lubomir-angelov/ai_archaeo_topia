@@ -54,8 +54,56 @@ MOUND = "mound"
 HARD_NEGATIVE = "hard_negative_symbol"
 UNCERTAIN = "uncertain_ignore"
 
-# Leave-one-sheet-out folds, identical to the v0.4 MapSAM configs so detection
-# and segmentation numbers stay commensurable.
+#: Splits declared by 1:100k parent sheet. Written by v0.6; see the file's own
+#: ``rationale`` for why the grouping is by parent and not by 1:25k sheet id.
+SPLITS_FILE = Path(__file__).resolve().parents[3] / "configs" / "splits" / "v0_6_splits.json"
+
+#: Preset name for the leave-one-sheet-out folds of v0.1-v0.5.
+LOSO_PRESET = "loso_v0_5"
+
+
+def load_folds(preset: str = LOSO_PRESET, splits_file: Path | None = None) -> dict[str, str]:
+    """Load a named fold preset, mapping fold name to its held-out eval sheet.
+
+    Folds were a hardcoded dict through v0.5, when three sheets made three
+    leave-one-sheet-out folds the only option. v0.6 adds 60 sheets and a
+    permanent train / validation / test split, so the definition moves into
+    ``configs/splits/v0_6_splits.json`` -- but the v0.5 folds stay available by
+    name, because every number in v0.1-v0.5 is reported against them and has to
+    remain reproducible.
+
+    Args:
+        preset: Preset name under ``presets`` in the splits file.
+        splits_file: Override for the splits file location.
+
+    Returns:
+        Mapping of fold name to held-out evaluation sheet.
+
+    Raises:
+        KeyError: If the preset is not declared.
+    """
+    path = splits_file or SPLITS_FILE
+    document = json.loads(path.read_text(encoding="utf-8"))
+    presets = document.get("presets", {})
+    if preset not in presets:
+        raise KeyError(f"no preset {preset!r} in {path}; have {sorted(presets)}")
+    return dict(presets[preset]["folds"])
+
+
+def load_splits(splits_file: Path | None = None) -> dict[str, list[str]]:
+    """Load the permanent train / validation / test split.
+
+    Returns:
+        Mapping of split name to sheet ids.
+    """
+    path = splits_file or SPLITS_FILE
+    return dict(json.loads(path.read_text(encoding="utf-8"))["splits"])
+
+
+#: Leave-one-sheet-out folds, identical to the v0.4 MapSAM configs so detection
+#: and segmentation numbers stay commensurable. Kept as a module-level name
+#: because three other modules import it, and literal here so that an installed
+#: copy without ``configs/`` alongside it still imports.
 FOLDS = {
     "foldA": "K-35-51-B-a",
     "foldB": "K-35-8-G-a",
