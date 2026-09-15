@@ -175,10 +175,43 @@ The corpus grows from 66.4 Mpx to 1384 Mpx, a **20-fold expansion**.
 
 ## Step 2 — Annotate the blind set
 
-One to two sheets chosen in step 1, full annotation protocol
-(`../annotation/PROTOCOL_EN.md`), **no model output visible to the annotator**.
+**Four sheets are already frozen**, at
+`data_lake/cleaned/map_clips/dataset_02/`, each as four RGBA PNG clips in the
+`<sheet>/<sheet>_N.png` convention:
 
-Freeze it. Open it at milestones only. It is not a validation set, it is not
+| sheet | source set | clips | note |
+|---|---|---|---|
+| `K-35-22-A-v` | `01_maps_test` | GIS-cut | shares no parent with an annotated sheet |
+| `K-35-39-G-v` | `02_maps_test` | GIS-cut | |
+| `K-35-39-V-g` | `02_maps_test` | GIS-cut | |
+| `L-35-139-V-v` | `02_maps_test` | programmatic 2×2 | the only sheet from the `L-35` zone |
+
+`L-35-139-V-v` is a deliberate inclusion: it is the only sheet outside the
+`K-34`/`K-35` zones the annotated corpus occupies, and the only one tiling to
+132 windows rather than 156, so it is the least like anything the detector has
+seen.
+
+Their parent rasters have been moved to
+`data_lake/raw/mound_test_20260915/_frozen/`, leaving **56 sheets** in the
+working pool for step 3. They were moved rather than deleted because the clips
+are PNG and carry no CRS: without the GeoTIFF there would be no way to put
+test-set detections on a map, which is precisely the result most worth showing
+geographically.
+
+Each folder carries a `clips.json` written by
+`archeo_topia.datasets.sheet_clips`, recording the parent raster, each clip's
+pixel offset within it, and each clip's own geotransform — so a detection at
+clip pixel `(x, y)` converts to EPSG:25835 from the PNG alone. For the three
+GIS-cut sheets the offsets were recovered by template-matching against the
+parent, which is exact: the clips are integer translations of parent pixels.
+Those three overlap their parent by 0.09% because the GIS cut is irregular by a
+few pixels; the programmatic split of `L-35-139-V-v` is lossless at exactly
+100%.
+
+Annotate these with the full protocol (`../../annotation/PROTOCOL_EN.md`) and
+**no model output visible to the annotator**.
+
+Freeze them. Open them at milestones only. It is not a validation set, it is not
 for checkpoint selection, and it is not for hyperparameter tuning — v0.5 had to
 evaluate `last.pt` rather than `best.pt` precisely because no leak-free
 selection surface existed, at a measured cost of reporting 0.812 instead of the

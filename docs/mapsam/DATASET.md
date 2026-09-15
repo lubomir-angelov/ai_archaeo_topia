@@ -2,6 +2,19 @@
 
 ## Overview
 
+**Known naming defect — folder names are not authoritative, file names are.**
+In the data lake, `cleaned/map_clips/dataset_01/K-34-8-G-a/` contains files
+named `K-35-8-G-a_*.png`. The **files** are correct; the folder name is a typo
+(`K-34-8` for `K-35-8`). The same typo propagated into CVAT, whose task is named
+`task_K34-8-G-a`. It is **deliberately not being fixed**: every experiment from
+v0.1 onward, the annotation exports and the CVAT task all key off the correct
+file names, so nothing is broken, and renaming now would desynchronise the CVAT
+task from the data lake for no benefit. Two folders in `dataset_02` carried the
+same class of error and *were* corrected before any experiment used them
+(`K-35-22-G-v` → `K-35-39-G-v`, `K-35-A-v` → `K-35-22-A-v`), confirmed by
+matching each folder's 2×2 clip reconstruction against the parent raster's
+dimensions. **When in doubt, trust the file name.**
+
 **Series.** These are Bulgarian archival topographic maps at **1:25,000**
 (see `docs/AI_ARCHEO_TOPIA_DMP.md`), georeferenced to EPSG:25835. Sheet ids use
 the Soviet-style nomenclature, where `K-35-51-B-a` denotes the 1:25k quadrant
