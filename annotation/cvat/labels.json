@@ -1,0 +1,451 @@
+{
+  "schema_version": "v0.0.3",
+  "note": "The label schema for this project had no machine-readable form until v0.6: it existed only implicitly inside the CVAT COCO exports, and the attribute list written into docs/annotation/PROTOCOL_EN.md had drifted away from it. This file is generated from annotation/cvat/v0.0.3/instances_default.json and is the source of truth from here on. Import it into CVAT as the project label set. annotation/archaeology_symbols_v1.yaml is NOT this schema -- it belongs to the unused SAM2 proposal path and nothing in MapSAM reads it.",
+  "builtin_attributes_excluded": [
+    "occluded",
+    "rotation"
+  ],
+  "labels": [
+    {
+      "name": "mound",
+      "type": "polygon",
+      "color": "#33ddff",
+      "attributes": [
+        {
+          "name": "affected_by_colored_pencil",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "blurred_or_bad_print",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_contour",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_forestation_line",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_grid",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_powerline",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_road",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "has_absolute_elevation_mark",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "has_relative_height_mark",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "has_trig_point",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "overlaps_other_mound",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "water_line_crossing",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "none",
+            "surface",
+            "underground",
+            "unreviewed"
+          ],
+          "default_value": "none"
+        },
+        {
+          "name": "annotation_provenance",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "human_added",
+            "model_proposal_accepted",
+            "model_proposal_corrected"
+          ],
+          "default_value": "human_added",
+          "comment": "How this annotation came to exist. The human_added rate on model-assisted sheets, measured against the blind test set, is the estimate of the bias assisted annotation introduces. Without this field that question cannot be answered after the fact."
+        },
+        {
+          "name": "detector_confidence",
+          "input_type": "text",
+          "mutable": true,
+          "values": [],
+          "default_value": "",
+          "comment": "The detector's confidence, carried on model proposals so a reviewer can sort by it and work the strongest candidates first. Empty on anything a human drew. It is provenance, not ground truth, and nothing downstream reads it as a label."
+        }
+      ]
+    },
+    {
+      "name": "hard_negative_symbol",
+      "type": "rectangle",
+      "color": "#fa3253",
+      "attributes": [
+        {
+          "name": "affected_by_colored_pencil",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "blurred_or_bad_print",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_contour",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_forestation_line",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_grid",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_powerline",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_road",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "has_absolute_elevation_mark",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "has_relative_height_mark",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "has_trig_point",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "negative_type",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "decorative_symbol",
+            "trig_point",
+            "road",
+            "text",
+            "contour",
+            "grid",
+            "colored_pencil",
+            "other"
+          ],
+          "default_value": "other"
+        },
+        {
+          "name": "overlaps_other_mound",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "water_line_crossing",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "none",
+            "surface",
+            "underground",
+            "unreviewed"
+          ],
+          "default_value": "none"
+        },
+        {
+          "name": "annotation_provenance",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "human_added",
+            "model_proposal_accepted",
+            "model_proposal_corrected"
+          ],
+          "default_value": "human_added",
+          "comment": "How this annotation came to exist. The human_added rate on model-assisted sheets, measured against the blind test set, is the estimate of the bias assisted annotation introduces. Without this field that question cannot be answered after the fact."
+        },
+        {
+          "name": "detector_confidence",
+          "input_type": "text",
+          "mutable": true,
+          "values": [],
+          "default_value": "",
+          "comment": "The detector's confidence, carried on model proposals so a reviewer can sort by it and work the strongest candidates first. Empty on anything a human drew. It is provenance, not ground truth, and nothing downstream reads it as a label."
+        }
+      ]
+    },
+    {
+      "name": "uncertain_ignore",
+      "type": "rectangle",
+      "color": "#ffcc33",
+      "attributes": [
+        {
+          "name": "affected_by_colored_pencil",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "blurred_or_bad_print",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_contour",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_forestation_line",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_grid",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_powerline",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "crossed_by_road",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "has_absolute_elevation_mark",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "has_relative_height_mark",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "has_trig_point",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "overlaps_other_mound",
+          "input_type": "checkbox",
+          "mutable": true,
+          "values": [
+            "false"
+          ],
+          "default_value": "false"
+        },
+        {
+          "name": "reason",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "possible_false_positive",
+            "ambiguous_symbol",
+            "other"
+          ],
+          "default_value": "possible_false_positive"
+        },
+        {
+          "name": "water_line_crossing",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "none",
+            "surface",
+            "underground",
+            "unreviewed"
+          ],
+          "default_value": "none"
+        },
+        {
+          "name": "annotation_provenance",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "human_added",
+            "model_proposal_accepted",
+            "model_proposal_corrected"
+          ],
+          "default_value": "human_added",
+          "comment": "How this annotation came to exist. The human_added rate on model-assisted sheets, measured against the blind test set, is the estimate of the bias assisted annotation introduces. Without this field that question cannot be answered after the fact."
+        },
+        {
+          "name": "detector_confidence",
+          "input_type": "text",
+          "mutable": true,
+          "values": [],
+          "default_value": "",
+          "comment": "The detector's confidence, carried on model proposals so a reviewer can sort by it and work the strongest candidates first. Empty on anything a human drew. It is provenance, not ground truth, and nothing downstream reads it as a label."
+        }
+      ]
+    }
+  ]
+}
