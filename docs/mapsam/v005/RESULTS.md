@@ -444,6 +444,85 @@ mechanically in the repository copy rather than by re-exporting from CVAT, so
 exactly that one field. No figure in this document changes: `negative_type` is
 used only to attribute false positives, and none were attributed to it.
 
+**A domain rule that predicts the error.** A mound cannot be crossed by a
+*surface* watercourse — water runs along terrain lows and a mound is a raised
+feature — so `crossed_by_water_line` on a `mound` is a review signal. **All
+twelve** relabelled mills carry it, probably for a reason worth stating: water
+mills sit *on* watercourses, so the attribute was true and it is mounds, not
+the attribute, that the water excludes.
+
+Applying the rule to the corrected export left two mounds flagged. Both have
+now been reviewed, and they resolved differently:
+
+| annotation | detector verdict | resolved |
+|---|---|---|
+| `K-35-51-B-a_3` (314, 15.5) | not detected; nearest candidate 253 px | **real mound, attribute wrong.** It sits beside a lake with no water line crossing it, and is heavily obscured by pencil marks and border/road lines |
+| `K-35-8-G-a_1` (955.5, 627.5), COCO id 22 | detected at 0.8 px, conf 0.838 | **real mound, attribute right.** A genuine water line does cross it — an *underground* one |
+
+**The second case forces a qualifier onto the rule.** An underground water line
+is a pipe and can run beneath anything, including a mound; only a surface
+watercourse carries the archaeological constraint. The `crossed_by_water_line`
+attribute does not distinguish the two, so it cannot be used as a mechanical
+check. A hit means one of three things — a mislabelled symbol, a wrongly set
+attribute, or a legitimate underground crossing — and only a person looking at
+the map can say which.
+
+If the annotation protocol is revised, splitting the attribute into surface and
+underground variants would restore it to a mechanical check. That is the
+cheapest schema change available with the largest validation payoff.
+
+The rule is one-way: it says nothing about symbols *not* crossed by a water
+line. And the other correlations seen on the mills — no relative height mark,
+crossed by a road — described that class incidentally and should not be
+generalized at all.
+
+**The `K-35-51-B-a_3` case is a confirmed detector miss on a real mound**, and
+the reason given for it — pencil and border/road obfuscation — is consistent
+with fold A's `blurred_or_bad_print` subset recall of 0.750 against 0.898
+overall. That is the detector's real failure mode on this data, as distinct
+from the mislabels that dominated the first experiment. Its incorrect attribute
+is still in `v0.0.2`; no figure here depends on it.
+
+## A method note worth carrying forward
+
+The detector's false positives are now a **review queue, not only an error
+rate**. One of experiment 1's fold C false positives was a real mound. Before
+treating a high-confidence false positive as a model defect, it is worth
+checking the map. Fold A currently reports 103 false positives at confidence
+0.05, of which 34 land on `road` and 8 on `decorative_symbol`; those are
+probably genuine errors, but the 61 on `background` have not been inspected.
+
+---
+
+## What was not done
+
+**Step 1 (more sheets)** — unchanged, and now the only thing standing between
+this and a defensible robustness claim.
+
+**Step 6 (second-stage classifier)** — not triggered. 0.00–0.36 false positives
+per window at confidence 0.25.
+
+**Step 7 (prompt-jitter augmentation)** — not triggered and contraindicated.
+Its condition was p90 outside 5 px; p90 is 2.0–3.7 px on every fold of both
+experiments.
+
+**Step 8 (permanent grouped splits)** — blocked on more sheets; the fold A
+trajectory is a second argument for it.
+
+**v0.4 revision** — done, in `../v004/RESULTS_REVISION.md`. Its conclusions
+survive the correction: the two folds with unchanged evaluation sets move by
+under 0.003 IoU.
+
+## Known data notes
+
+**The `negative_type` patch.** One of the twelve relabelled symbols,
+`K-34-35-B-g_3` at (1566, 1103), exported with `negative_type`
+`__undefined__` where the other eleven carry `other`. It was corrected
+mechanically in the repository copy rather than by re-exporting from CVAT, so
+`annotation/cvat/v0.0.2/instances_default.json` differs from the CVAT export by
+exactly that one field. No figure in this document changes: `negative_type` is
+used only to attribute false positives, and none were attributed to it.
+
 **A domain rule that predicts the error.** A mound cannot be crossed by a water
 line — water runs along terrain lows and a mound is a raised feature — so
 `crossed_by_water_line` on a `mound` is a data-error signal. **All twelve**
