@@ -12,11 +12,19 @@ The organizing idea is a change of role for MapSAM:
 
 That separation is what `docs/mapsam/v004/RESULTS.md` made concrete. The
 prompt-jitter control arm showed that the input window can be misplaced by up
-to ~250 source px at no measurable cost, while the *prompt* must land within
-roughly 15 source px. So the detector does not need to produce a well-centred
-crop, or a good mask, or a tight box. It needs to point at the right symbol.
+to ~250 source px at no measurable cost, while the *prompt* must land on the
+symbol. So the detector does not need to produce a well-centred crop, or a good
+mask, or a tight box. It needs to point at the right symbol.
+
 That is a writable specification, and having it is the main reason the MapSAM
 work was worth doing before the detector exists.
+
+**Read the prompt tolerance carefully.** v0.4 summarized it as "about 15 px",
+but that is where the segmenter *fails*, not where it works: the IoU≥0.5 rate
+runs 1.00 at 0 px, 1.00 at 5 px, 0.69 at 10 px and **0.02 at 15 px**. The
+working band is ≤5 px, 5–10 px is marginal, and 15 px is effectively a miss.
+The detector target is therefore **p90 centre error ≤ 5 source px**.
+`docs/mapsam/v005/PLAN.md` states the correction in full.
 
 ---
 
@@ -36,7 +44,7 @@ Georeferenced historical map sheet
  Mound / hard-negative classifier                [not built]
           │
           ▼
- Candidate point (≲15 px localization error)
+ Candidate point (p90 localization error ≤ 5 px)
           │
           ▼
  512 px prompt-centred crop                      [built, v0.4]
@@ -109,6 +117,10 @@ underperform one with mediocre box IoU that lands within 10 px almost always.
 
 Report recall at R = 5, 10, 15 and 25 source px, and the p90 of centre error
 rather than the median — the tail is what falls outside the tolerance band.
+**Recall@5px is the primary figure**; the rest of the curve is reported for
+composition with v0.4's tolerance curve, not for acceptance decisions. At
+R = 25 px, matching must be strictly one-to-one: 17 of 180 mounds have a
+neighbour within 25 px, so greedy matching inflates the figure.
 `docs/mapsam/v005/PLAN.md` carries the full metric hierarchy.
 
 **Supervision available today**, verified against
@@ -204,7 +216,7 @@ MapSAM:        ███
 ```
 
 **Scope caveat that must travel with those numbers:** all three sheets are one
-Soviet 1:50k series. This is *within-series conditional* segmentation.
+Bulgarian 1:25k series. This is *within-series conditional* segmentation.
 Cross-cartographic behaviour is untested.
 
 ## Stage 4 — Mask back into source-map coordinates
@@ -224,8 +236,8 @@ detector_to_mask_centroid_distance_px
 
 is a production monitor for detector localization quality that needs no ground
 truth. Given v0.4's tolerance curve, it is directly interpretable: values
-drifting past ~15 px predict segmentation degradation before anyone notices it
-in the output.
+drifting past ~5 px predict segmentation degradation before anyone notices it
+in the output, and ~10 px is already a third of instances lost.
 
 ## Stage 5 — Pixel coordinates to GIS geometry
 
@@ -460,27 +472,26 @@ Three deliberate choices in that shape:
 
 Two hard dependencies, one soft:
 
-1. **A detector with p90 centre error inside ~15 source px.** Everything from
+1. **A detector with p90 centre error inside ~5 source px.** Everything from
    stage 3 onward is validated and waiting; nothing runs without this.
 2. **More map sheets, and preferably a second cartographic series.** Three
-   sheets of one Soviet 1:50k series cannot support a robustness claim for any
+   sheets of one Bulgarian 1:25k series cannot support a robustness claim for any
    stage. `data/maps`, `data/georeferenced` and `data/cvat_exports` are
    currently empty.
 3. **Georeferencing above 30.5%** — soft, because stage 5 is designed to be
    optional, but the GIS output is one of the project's main practical
    deliverables and it is gated on this.
 
-One open data question that detection cannot ignore, unlike segmentation:
-`docs/mapsam/DATASET.md` records 180 `mound` annotations (146 train / 34 test)
-while the manifest holds 171 samples (137 / 34), and states that each
-annotation produces one sample. Nine train annotations are unaccounted for.
-Detection recall is measured against annotations, so this needs resolving before
-a recall figure means anything.
+The 180-annotations-versus-171-samples question this section previously raised
+is resolved: one mound annotation carries no geometry and eight pairs of
+touching mounds share a connected component. `docs/mapsam/v005/PLAN.md` holds
+the accounting. Detection recall is measured against the 180 annotations; the
+end-to-end denominator is the 179 that have geometry.
 
 ## Why the MapSAM work was worth doing first
 
 The expensive, uncertain, research-heavy stage is done and validated: given a
-prompt within ~15 px, the pipeline turns it into a precise symbol mask at
+prompt within ~5 px, the pipeline turns it into a precise symbol mask at
 99–100% IoU≥0.5 across every sheet available.
 
 More usefully, v0.4 produced the *specification* for the stage that does not

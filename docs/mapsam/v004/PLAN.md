@@ -109,7 +109,7 @@ worth less if it is more fragile to prompt error. Two or three runs, not a grid.
 ## Step 5 — More sheets
 
 The binding constraint regardless of how steps 1–4 resolve. Prefer several
-sheets from this Soviet 1:50k series **and** several genuinely different
+sheets from this Bulgarian 1:25k series **and** several genuinely different
 cartographic sources; all of v0.3's variation is within one series, so
 cross-cartographic behaviour is entirely untested.
 

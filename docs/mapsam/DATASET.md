@@ -2,6 +2,13 @@
 
 ## Overview
 
+**Series.** These are Bulgarian archival topographic maps at **1:25,000**
+(see `docs/AI_ARCHEO_TOPIA_DMP.md`), georeferenced to EPSG:25835. Sheet ids use
+the Soviet-style nomenclature, where `K-35-51-B-a` denotes the 1:25k quadrant
+of the 1:50k sheet `K-35-51-B`. Earlier drafts of several documents described
+this as a "Soviet 1:50k series", reading the nomenclature as the scale; that
+was wrong and has been corrected throughout.
+
 Dataset for fine-tuning the SAM (Segment Anything Model) mask decoder to segment
 archaeological mound symbols on historical map imagery. Source: manually annotated
 mound polygons from historical topographic maps, converted to binary masks with
@@ -63,7 +70,17 @@ No separate validation split. Test split doubles as validation during training
 | uncertain_ignore | 3 | 3 | 0 |
 | hard_negative_symbol | 530 | 434 | 96 |
 
-Each mound annotation produces one training sample with:
+**180 mound annotations produce 171 training samples**, not 180. One annotation
+(`K-34-35-B-g_3`, a 16×8 px symbol truncated at the tile's top edge) carries a
+bounding box but no geometry, and eight pairs of touching mound polygons share
+a single connected component. One further annotation splits across two
+components and one sub-20 px fragment is dropped by `min_component_area`; those
+two offset each other. Segmentation can work from the 171 samples, but
+**detection recall must be measured against the 180 annotations** — see
+`v005/PLAN.md`.
+
+Each mound annotation that survives that accounting produces one training
+sample with:
 - Binary target mask (single connected component)
 - Bounding box prompt `[x_min, y_min, x_max, y_max]`
 - Center point prompt `[cx, cy]`
