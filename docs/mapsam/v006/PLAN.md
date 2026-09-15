@@ -121,7 +121,7 @@ annotated within it.
 A `gdalinfo` sweep over all 60 sheets at
 `data_lake/raw/mound_test_20260915` settles the two questions this plan
 originally flagged as blocking. **No rescaling is needed and no georeferencing
-work is needed.**
+work is needed.** Per-sheet detail is in `INPUT_INVENTORY.md`.
 
 | | value |
 |---|---|
