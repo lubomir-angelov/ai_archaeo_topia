@@ -9,7 +9,7 @@ description = "SAM2-based auto-annotation of archaeological map images"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
-    "mcp>=1.20",
+    "mcp>=1.20,<2",  # the low-level Server decorator API (@server.list_tools) was removed in 2.x
     "Pillow>=10.0",
     "PyMuPDF>=1.24",
     "requests>=2.31",

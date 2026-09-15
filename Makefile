@@ -6,7 +6,7 @@ SHELL := /usr/bin/env bash
 .PHONY: sam2-mcp-run sam2-mcp-health sam2-mcp-smoke sam2-mcp-contract-test sam2-mcp-mock-smoke sam2-mcp-live-health
 .PHONY: sam2-backend-run sam2-backend-health sam2-backend-mock-smoke sam2-backend-contract-test
 .PHONY: annotation-pdf-sam2-mock-dry-run annotation-pdf-sam2-mock-run annotation-pdf-sam2-validate
-.PHONY: mapsam-prepare mapsam-prepare-v0 mapsam-summary
+.PHONY: mapsam-prepare mapsam-prepare-v0 mapsam-prepare-latest mapsam-summary
 
 VENV_DIR := $(HOME)/venvs
 VENV_NAME := ai_archaeo_topia
@@ -58,7 +58,8 @@ help:
 	@echo "    COCO_JSON=...                  Path to COCO instances_default.json"
 	@echo "    IMAGES_DIR=...                 Path to CVAT images directory"
 	@echo "    OUTPUT_DIR=...                 Output directory for MapSAM dataset"
-	@echo "  make mapsam-prepare-v0           - Quick run with default v0.0.1 paths"
+	@echo "  make mapsam-prepare-v0           - Reproduce the original mapsam_v0 (pinned to v0.0.1)"
+	@echo "  make mapsam-prepare-latest       - Build from the current annotations (v0.0.3)"
 	@echo "  make mapsam-summary              - Print dataset_summary.json"
 	@echo ""
 	@echo "Quality gates:"
@@ -382,11 +383,23 @@ mapsam-prepare:
 		--hard-negative-label hard_negative_symbol \
 		--split-by sheet
 
+# Pinned to the v0.0.1 export on purpose: this target reproduces the original
+# mapsam_v0 dataset that v0.1-v0.3 were trained and reported on. Do not repoint
+# it at a later export -- that would silently change what mapsam_v0 means. Use
+# mapsam-prepare-latest for current work.
 mapsam-prepare-v0:
 	@$(MAKE) mapsam-prepare \
 		COCO_JSON=annotation/cvat/v0.0.1/instances_default.json \
 		IMAGES_DIR=data/curated/datasets/cvat/v0.0.1/images/default \
 		OUTPUT_DIR=data/curated/datasets/mapsam_v0
+
+# The current annotations: v0.0.3 corrects the twelve mislabelled mills (v0.0.2)
+# and splits the water-line attribute into surface/underground (v0.0.3).
+mapsam-prepare-latest:
+	@$(MAKE) mapsam-prepare \
+		COCO_JSON=annotation/cvat/v0.0.3/instances_default.json \
+		IMAGES_DIR=data/curated/datasets/cvat/v0.0.1/images/default \
+		OUTPUT_DIR=data/curated/datasets/mapsam_v04
 
 mapsam-summary:
 	@summary="data/curated/datasets/mapsam_v0/metadata/dataset_summary.json"; \

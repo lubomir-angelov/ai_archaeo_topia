@@ -106,7 +106,7 @@ windows per Mpx** at window 512 / stride 384, and measured false-positive rates
 are 0.61 (fold A), 0.01 (fold B) and 0.14 (fold C) per window at confidence
 0.05. But those come from annotation-selected clips. A whole sheet contains
 large uninformative regions, so the per-window rate could move in either
-direction — `../architecture/TARGET_PIPELINE.md` stage 0 flags exactly this and
+direction — `../../architecture/TARGET_PIPELINE.md` stage 0 flags exactly this and
 it has never been measured. **Measure it on a full sheet before committing a
 reviewer to 60 of them.**
 
@@ -146,7 +146,7 @@ and the detector's input regime does not change.
 the GeoTIFF itself. The 20 `.tif.aux.xml` files hold only GDAL PAM band
 statistics — min, max, mean, stddev — and are irrelevant to georeferencing. The
 30.5% auto-georef pass rate is off the critical path and GIS output
-(`TARGET_PIPELINE.md` stage 5) is unblocked. Nothing in steps 1–4 depends on it
+(`../../architecture/TARGET_PIPELINE.md` stage 5) is unblocked. Nothing in steps 1–4 depends on it
 regardless, by design: all stages operate in source pixel space.
 
 **The sheets are already clipped** to the map frame (`*_clipped.tif`), so no
@@ -235,7 +235,7 @@ from the v0.5 detector and end-to-end output to that format is the only new code
 this step needs.
 
 **Import false positives pre-labelled as `hard_negative_symbol`.** They are
-confusable symbols by construction. The class currently holds 530 hand-picked
+confusable symbols by construction. The class currently holds 542 hand-picked
 confusables; the detector will supply thousands at no annotation cost, and the
 reviewer only has to delete the ones that are actually mounds.
 
@@ -319,9 +319,13 @@ there is a test result to build on, not before.
 
 ## Known debt, unchanged
 
-Seven pre-existing `sam2_mcp` / `sam2_backend` test failures, and
-repository-wide ruff errors outside the modules `make lint` covers. Neither
-affects any conclusion above.
+Three pre-existing `sam2_backend` test failures — measured in v0.6, not the
+"seven" that four earlier documents carried forward without re-measuring —
+and repository-wide ruff errors outside the modules `make lint` covers.
+Neither affects any conclusion above. The three are environment-coupled
+assertions: `test_resolved_device_auto_no_cuda` assumes no CUDA is present,
+and the two `test_sam2_mode_*` cases assume the `sam2` extra is installed.
+`test_sam2_mcp.py` passes clean.
 
 The `sam2-mcp` MCP server failed to connect during the v0.5 session, so the
 SAM 2 annotation-assist path was unavailable and the missing mound was drawn by

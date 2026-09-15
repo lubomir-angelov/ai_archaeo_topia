@@ -293,54 +293,114 @@ Use this class for:
 
 ## 8. Object-level attributes
 
-In addition to the class label, each annotated object should have attributes when possible.
+**Reconciled against the live CVAT schema in v0.6 (2026-09-15).** This section
+had drifted: it listed five attributes CVAT does not emit and omitted four that
+it does, including `crossed_by_water_line`, which is the attribute that caught
+twelve mislabelled watermills. The machine-readable source of truth is now
+`annotation/cvat/labels.json`, generated from the export; this section
+describes it in prose and the two must not disagree again.
 
-Recommended object attributes:
+Note that `object_id`, `sample_id`, `class_name` and `bbox_*` are **columns of
+the master sample table** (section 5), not CVAT object attributes. CVAT supplies
+the identity and the geometry itself.
+
+### 8.1. Attributes on every object
+
+All three classes carry the same eleven boolean flags, all defaulting to false:
 
 ```text
-object_id
-sample_id
-class_name
-bbox_xmin
-bbox_ymin
-bbox_xmax
-bbox_ymax
 has_trig_point
-has_elevation_mark
-has_name_label
+has_absolute_elevation_mark
+has_relative_height_mark
 crossed_by_grid
 crossed_by_contour
 crossed_by_road
 crossed_by_powerline
-crossed_by_boundary
+crossed_by_forestation_line
 affected_by_colored_pencil
 blurred_or_bad_print
 overlaps_other_mound
-negative_type
-is_uncertain
-comment
 ```
 
-For `negative_type`, use:
+There is no `has_elevation_mark`. The schema distinguishes an **absolute**
+elevation figure (a height above sea level) from a **relative** height mark (the
+mound's own height above surrounding ground, printed as `+1,7`). The latter is
+true on 158 of 169 mounds and is effectively part of the mound symbol
+convention, so collapsing the two would lose the more informative one.
+
+`crossed_by_boundary`, `has_name_label`, `is_uncertain` and `comment` were
+listed here previously and do not exist. Use `uncertain_ignore` as a class for
+the third of those.
+
+### 8.2. `water_line_crossing` (replaces `crossed_by_water_line`)
+
+A select with values `none`, `surface`, `underground`, `unreviewed`; default
+`none`.
+
+**A mound cannot be crossed by a *surface* watercourse.** Water runs along
+terrain lows and a mound is a raised feature, so `surface` on a `mound` is a
+data error — either the symbol is mislabelled or the attribute is wrong, and
+only a person looking at the map can say which. That rule found all twelve
+watermills labelled as mounds on `K-34-35-B-g`: water mills sit *on*
+watercourses, so the attribute was true and it is mounds, not the attribute,
+that the water excludes.
+
+An **underground** line is a pipe and can run beneath anything, including a
+mound. The old boolean conflated the two, which is why it could only ever be a
+review hint. Recording which kind restores it to a check a machine can run.
+
+Use `unreviewed` when the crossing has not been classified. It is the honest
+value and it doubles as a work queue; do not guess `surface`.
+
+The rule is one-way: it says nothing about symbols *not* crossed by a water
+line.
+
+### 8.3. `negative_type`, on `hard_negative_symbol` only
+
+The values actually in use, with their counts in the v0.0.2 export:
 
 ```text
-watermill
-windmill
-reservoir_or_tank
-forest_belt_symbol
-elevation_dot
-building
-pit_or_negative_form
-vineyard_or_orchard_symbol
-unknown_round_symbol
-text
-road
-grid_artifact
-decorative_mark
-other
+decorative_symbol   246
+trig_point          136
+road                 97
+text                 29
+other                17
+colored_pencil        7
+grid                  6
+contour               1
 ```
 
----
+Earlier drafts of this section proposed a much finer vocabulary — `watermill`,
+`windmill`, `reservoir_or_tank`, `forest_belt_symbol`, `elevation_dot`,
+`building`, `pit_or_negative_form`, `vineyard_or_orchard_symbol`,
+`unknown_round_symbol`, `grid_artifact`, `decorative_mark`. None of it was ever
+used. Annotate with the list above; if a finer distinction is genuinely needed,
+add it to `annotation/cvat/labels.json` first so the schema and this document
+stay in step.
+
+`trig_point` deserves care: it is the second-largest negative class, while
+`has_trig_point` is true on 41 mounds. **The same printed element is a negative
+when it stands alone and an attribute of a positive when it sits on a mound.**
+That is genuinely context-dependent and no quantity of data removes the
+judgement.
+
+### 8.4. `reason`, on `uncertain_ignore` only
+
+`possible_false_positive`, `ambiguous_symbol`, `other`.
+
+### 8.5. `annotation_provenance`
+
+Added in v0.6, on every object: `human_added`, `model_proposal_accepted`,
+`model_proposal_corrected`.
+
+Model-assisted annotation imports detector proposals pre-drawn, so a reviewer
+accepts, adjusts or deletes rather than drawing from scratch. That saves a great
+deal of time and it introduces a bias: anything the detector systematically
+misses never enters the ground truth. **The `human_added` rate on assisted
+sheets, compared against the blind test set, is the estimate of that bias.**
+Without this field the question cannot be answered after the fact, so set it on
+every object, including ones you drew yourself.
+
 
 ## 9. Bounding box rules
 
@@ -387,7 +447,8 @@ crossed_by_grid = true
 crossed_by_road = true
 crossed_by_contour = true
 crossed_by_powerline = true
-crossed_by_boundary = true
+crossed_by_forestation_line = true
+water_line_crossing = surface | underground | unreviewed
 ```
 
 Do not skip mounds just because they are partially crossed.
@@ -412,9 +473,11 @@ Use:
 
 ```text
 class_name = uncertain_ignore
-is_uncertain = true
-comment = "Reason for uncertainty..."
+reason = possible_false_positive | ambiguous_symbol | other
 ```
+
+There is no free-text `comment` attribute in the schema; `reason` carries the
+category and anything longer belongs in the master sample table.
 
 Examples:
 
@@ -577,14 +640,21 @@ For each object, fill attributes such as:
 
 ```text
 has_trig_point
-has_elevation_mark
+has_absolute_elevation_mark
+has_relative_height_mark
 crossed_by_grid
 crossed_by_contour
 crossed_by_road
+crossed_by_forestation_line
 affected_by_colored_pencil
 blurred_or_bad_print
 overlaps_other_mound
+water_line_crossing
+annotation_provenance
 ```
+
+The full list is in section 8 and the authoritative schema is
+`annotation/cvat/labels.json`.
 
 ## Step 7 — Add comments for difficult cases
 

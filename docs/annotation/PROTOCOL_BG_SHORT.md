@@ -39,7 +39,7 @@ dataset/
 
 ## 6. Атрибути към обект
 
-`object_id`, `sample_id`, `class_name`, `bbox_xmin/ymin/xmax/ymax`, `has_trig_point`, `has_elevation_mark`, `has_name_label`, `crossed_by_grid/contour/road/powerline/boundary`, `affected_by_colored_pencil`, `blurred_or_bad_print`, `overlaps_other_mound`, `negative_type` (watermill, windmill, reservoir_or_tank, forest_belt_symbol, elevation_dot, building, pit_or_negative_form, vineyard_or_orchard_symbol, unknown_round_symbol, other), `is_uncertain`, `comment`.
+`has_trig_point`, `has_absolute_elevation_mark`, `has_relative_height_mark`, `crossed_by_grid/contour/road/powerline/forestation_line`, `affected_by_colored_pencil`, `blurred_or_bad_print`, `overlaps_other_mound`, `water_line_crossing` (none / surface / underground / unreviewed), `negative_type` (decorative_symbol, trig_point, road, text, grid, contour, colored_pencil, other), `annotation_provenance` (human_added / model_proposal_accepted / model_proposal_corrected). `object_id`, `sample_id`, `class_name` и `bbox_*` са колони в master samples таблицата, не атрибути в CVAT. Пълната схема: `annotation/cvat/labels.json`; подробностите са в `PROTOCOL_BG.md`, раздел 8.
 
 ## 7. Правила за bounding box
 
