@@ -116,25 +116,62 @@ sheets. This is the only place in the plan where model output touches the blind
 set, and it is safe: choosing *which* sheet to annotate does not bias *what* is
 annotated within it.
 
-### Prerequisite: confirm the input regime
+### Input regime — measured, both prerequisites cleared
 
-Two checks, both minutes, both of which invalidate step 1 if skipped.
+A `gdalinfo` sweep over all 60 sheets at
+`data_lake/raw/mound_test_20260915` settles the two questions this plan
+originally flagged as blocking. **No rescaling is needed and no georeferencing
+work is needed.**
 
-**Scan resolution.** The detector is tuned to a ~25 px symbol — mound boxes run
-8–33 px with a 25×23 median — inside 512 px windows. If the new scans are at a
-different DPI the symbol could be 12 px or 50 px, and the window and stride must
-be rescaled to keep the symbol at roughly the same fraction of the window.
-`gdalinfo` plus one look at a mound symbol settles it. **Do not run step 1
-before this is known**; a mismatch here would produce a false negative on
-"did the domain transfer".
+| | value |
+|---|---|
+| sheets | 60 — 20 in `01_maps_test`, 40 in `02_maps_test` |
+| dimensions | 4682–5112 × 4328–4635 px, median 4920 × 4464 |
+| area | 20.3–23.4 Mpx per sheet, **1318 Mpx total** |
+| pixel size | 2.106–2.157 m/px, median 2.119 — a 2.4% spread |
+| CRS | **EPSG:25835 on all 60**, embedded in the GeoTIFF |
+| bands | RGBA, Byte, DEFLATE, 512×512 blocks |
+| ground extent | ~10.4 × 9.5 km per sheet |
 
-**Georeferencing.** All 60 sheets are hand-georeferenced, which removes the
-30.5% auto-georef pass rate from the critical path and unblocks GIS output
-(`TARGET_PIPELINE.md` stage 5). 20 of 60 carry a `.tif.aux.xml` sidecar, which
-normally holds statistics and projection rather than the transform, so the
-other 40 most likely carry it internally — confirm with a `gdalinfo` sweep.
-Nothing in steps 1–4 depends on it, by design: all stages operate in source
-pixel space.
+**Scan resolution: unchanged, so window 512 / stride 384 carries over.** At
+1:25,000 a 2.119 m/px pixel is 0.0848 mm on paper, i.e. a **300 DPI** scan
+(range 294–302 across the 60). The existing corpus is at the same resolution,
+which the clip dimensions confirm arithmetically: its 12 clips are four-per-sheet
+quarter crops, and reconstructing each sheet as 2×2 gives 4810×4434, 4948×4484
+and 4996×4588 — every one inside the new sheets' range. The mound symbol
+therefore stays at its current ~25 px (53 m on the ground, 2.12 mm on paper),
+and the detector's input regime does not change.
+
+**Georeferencing: embedded, not sidecar.** All 60 carry CRS and geotransform in
+the GeoTIFF itself. The 20 `.tif.aux.xml` files hold only GDAL PAM band
+statistics — min, max, mean, stddev — and are irrelevant to georeferencing. The
+30.5% auto-georef pass rate is off the critical path and GIS output
+(`TARGET_PIPELINE.md` stage 5) is unblocked. Nothing in steps 1–4 depends on it
+regardless, by design: all stages operate in source pixel space.
+
+**The sheets are already clipped** to the map frame (`*_clipped.tif`), so no
+collar or margin removal is needed before tiling.
+
+### What this does to the review-burden estimate
+
+Tiling at 512/384 over the measured dimensions:
+
+| | value |
+|---|---|
+| windows per sheet | 132–156, median 156 |
+| **windows total** | **9,271** |
+| windows per Mpx | 7.03 (current corpus: 7.23) |
+| projected false positives at conf 0.25 | ~3,300 |
+| projected false positives at conf 0.05 | ~5,700 |
+| projected mounds, upper bound | ~3,400 |
+
+The mound figure applies the current corpus's 2.55 mounds/Mpx, measured on
+annotation-selected clips, so it is an **upper bound**: whole sheets contain
+uninformative regions those clips do not represent. Step 1 replaces both
+projections with measurements; they are recorded here so the step has something
+to falsify.
+
+The corpus grows from 66.4 Mpx to 1384 Mpx, a **20-fold expansion**.
 
 ## Step 2 — Annotate the blind set
 
@@ -179,7 +216,17 @@ it, the question is unanswerable after the fact.
 
 ## Step 4 — Permanent grouped splits, and the first real test result
 
-With 63 sheets, split by sheet into train / validation / frozen test. The
+**Group by 1:100k parent sheet, not by 1:25k sheet.** The sweep found four new
+sheets sharing a parent with an annotated one: `K-34-35-A-v`, `K-35-51-A-b`,
+`K-35-51-B-g` and `K-35-8-V-g`. `K-35-51-B-g` is the *adjacent quadrant* to the
+annotated `K-35-51-B-a` — same 1:50k sheet, neighbouring 1:25k cell. Adjacent
+quadrants share terrain, survey campaign, print run and scan batch, so putting
+one in train and its neighbour in test is a weaker separation than the sheet ids
+suggest. Grouping on the 1:100k parent (`K-34-35`, `K-35-51`, `K-35-8`, …) costs
+nothing and removes the doubt. No sheet id collides outright with the existing
+three.
+
+With 63 sheets, split by parent into train / validation / frozen test. The
 validation split finally makes leak-free checkpoint and hyperparameter
 selection possible; the frozen test is the blind set from step 2.
 
@@ -207,9 +254,10 @@ the nomenclature was read as the scale. A field makes that unrepeatable.
 
 ## Constraints carried forward
 
-- Window 512, stride 384 — **subject to rescaling if the new scans differ in
-  DPI**, which is the one parameter this plan may have to change.
-- Split by sheet, never by sample.
+- Window 512, stride 384 — confirmed unchanged; the new scans are the same
+  300 DPI regime as the current corpus.
+- Split by sheet, never by sample, and group adjacent quadrants by their 1:100k
+  parent.
 - The blind set is never shown model output before it is annotated.
 - Everything operates in source pixel space; georeferencing stays off the
   critical path even though it is now available.
