@@ -446,19 +446,34 @@ used only to attribute false positives, and none were attributed to it.
 
 **A domain rule that predicts the error.** A mound cannot be crossed by a water
 line — water runs along terrain lows and a mound is a raised feature — so
-`crossed_by_water_line` on a `mound` is a label-error signal. **All twelve**
+`crossed_by_water_line` on a `mound` is a data-error signal. **All twelve**
 relabelled mills carry it. Applying the rule to the corrected export leaves two
 mounds still flagged, on sheets that have had no adversarial review:
 
-| annotation | detector verdict | reading |
+| annotation | detector verdict | resolved |
 |---|---|---|
-| `K-35-51-B-a_3` (314, 15.5) | not detected; nearest candidate 253 px | rule and model agree; also truncated at the tile edge and flagged blurred |
-| `K-35-8-G-a_1` (955.5, 627.5) | detected at 0.8 px, conf 0.838 | rule and model disagree; carries a trig point and both elevation marks, so more likely a wrong attribute than a wrong label |
+| `K-35-51-B-a_3` (314, 15.5) | not detected; nearest candidate 253 px | **a real mound; the attribute is wrong.** Confirmed by the annotator: it sits beside a lake with no water line crossing it, and is heavily obscured by pencil marks and border/road lines |
+| `K-35-8-G-a_1` (955.5, 627.5) | detected at 0.8 px, conf 0.838 | unreviewed; carries a trig point and both elevation marks, so most likely the same kind of attribute error |
 
-The rule is a review flag, not an automatic relabel, and it is one-way: it says
-nothing about symbols not crossed by a water line. The other correlations seen
-on the mills — no relative height mark, crossed by a road — turned out to
-describe that class incidentally and should not be generalized the same way.
+**A violation does not say which field is wrong.** It means either the symbol
+is mislabelled or the attribute was set in error, and only a person looking at
+the map can tell them apart. On this data the split is clean: among the mills
+the label was wrong, and among the two survivors the attribute is. The
+constraint itself has produced no counter-example — no annotation yet examined
+is a mound genuinely crossed by a water line.
+
+The rule is one-way: it says nothing about symbols *not* crossed by a water
+line. And the other correlations seen on the mills — no relative height mark,
+crossed by a road — turned out to describe that class incidentally and should
+not be generalized the same way.
+
+The `K-35-51-B-a_3` annotation still carries the incorrect attribute in
+`v0.0.2`; it is not used by any figure in this document, and correcting it is
+left to the next export. It is, however, a **confirmed detector miss on a real
+mound**, and the reason given for it — pencil and border/road obfuscation — is
+consistent with fold A's `blurred_or_bad_print` subset recall of 0.750 against
+0.898 overall. That is the detector's real failure mode on this data, as
+distinct from the mislabels that dominated the first experiment.
 
 ---
 
