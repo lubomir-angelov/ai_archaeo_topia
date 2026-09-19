@@ -53,35 +53,24 @@ import torch
 from PIL import Image
 
 from archeo_topia.analysis.detection_metrics import Detection
+from archeo_topia.formats.coco import CATEGORIES as SCHEMA_CATEGORIES
+from archeo_topia.formats.coco import HARD_NEGATIVE, MOUND
+from archeo_topia.formats.labels import LabelSchema
 
 logger = logging.getLogger(__name__)
 
 Image.MAX_IMAGE_PIXELS = None
 
-#: COCO category ids, matching annotation/cvat/labels.json and every export so far.
-CATEGORIES = [
-    {"id": 1, "name": "mound", "supercategory": ""},
-    {"id": 2, "name": "hard_negative_symbol", "supercategory": ""},
-    {"id": 3, "name": "uncertain_ignore", "supercategory": ""},
-]
+#: COCO category ids, from the one place they are declared.
+CATEGORIES = [dict(category) for category in SCHEMA_CATEGORIES]
 
 #: Smallest polygon, in points, CVAT will accept as a shape.
 MIN_POLYGON_POINTS = 3
 
-#: Attribute defaults. Every boolean starts false; the reviewer sets what applies.
-BOOLEAN_ATTRIBUTES = (
-    "affected_by_colored_pencil",
-    "blurred_or_bad_print",
-    "crossed_by_contour",
-    "crossed_by_forestation_line",
-    "crossed_by_grid",
-    "crossed_by_powerline",
-    "crossed_by_road",
-    "has_absolute_elevation_mark",
-    "has_relative_height_mark",
-    "has_trig_point",
-    "overlaps_other_mound",
-)
+#: The schema of record. Attribute defaults come from this file rather than
+#: from a literal list here: the two used to be maintained in parallel, and a
+#: test existed for no purpose other than noticing when they drifted apart.
+DEFAULT_SCHEMA = Path("annotation/cvat/labels.json")
 
 
 def load_candidates(path: Path) -> list[dict[str, Any]]:
@@ -159,8 +148,12 @@ def annotation_record(
     bbox: list[float],
     polygon: list[float] | None,
     score: float,
+    schema: LabelSchema | None = None,
 ) -> dict[str, Any]:
     """Build one COCO annotation with the project's attribute defaults.
+
+    Defaults come from the schema of record, so a new attribute added there
+    appears here without an edit, and cannot be forgotten.
 
     Args:
         annotation_id: Unique id.
@@ -169,16 +162,17 @@ def annotation_record(
         bbox: ``[x, y, w, h]`` in clip coordinates.
         polygon: Flat polygon, or None for a box-only shape.
         score: Detector confidence, carried so a reviewer can sort by it.
+        schema: Label schema; loaded from ``DEFAULT_SCHEMA`` when omitted.
 
     Returns:
         The annotation.
     """
-    attributes: dict[str, Any] = dict.fromkeys(BOOLEAN_ATTRIBUTES, False)
+    schema = schema or LabelSchema.load(DEFAULT_SCHEMA)
+    label = MOUND if category_id == 1 else HARD_NEGATIVE
+    attributes = schema.defaults(label)
     attributes["water_line_crossing"] = "unreviewed"
     attributes["annotation_provenance"] = "model_proposal_accepted"
     attributes["detector_confidence"] = round(score, 4)
-    if category_id == 2:
-        attributes["negative_type"] = "other"
     return {
         "id": annotation_id,
         "image_id": image_id,

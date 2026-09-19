@@ -292,14 +292,20 @@ def write_candidates(
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         for det in sorted(candidates, key=lambda d: -d.score):
+            # Round the pixel first, then derive the ground coordinate from the
+            # rounded value. Deriving it from the unrounded one instead leaves
+            # the two fields disagreeing by a few millimetres, so anyone who
+            # recomputes easting from the x this file records gets a different
+            # answer than the one beside it.
+            x, y = round(det.x, 2), round(det.y, 2)
             record: dict[str, Any] = {
                 "sheet_id": sheet.sheet_id,
-                "x": round(det.x, 2),
-                "y": round(det.y, 2),
+                "x": x,
+                "y": y,
                 "score": round(det.score, 4),
                 "box": [round(v, 2) for v in det.box] if det.box else None,
             }
-            ground = to_ground(sheet.geotransform, det.x, det.y)
+            ground = to_ground(sheet.geotransform, x, y)
             if ground:
                 record["easting"] = round(ground[0], 3)
                 record["northing"] = round(ground[1], 3)

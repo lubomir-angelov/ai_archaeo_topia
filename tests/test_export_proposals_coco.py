@@ -5,11 +5,11 @@ from __future__ import annotations
 import numpy as np
 
 from archeo_topia.datasets.export_proposals_coco import (
-    BOOLEAN_ATTRIBUTES,
     annotation_record,
     assign_to_clips,
     mask_to_polygon,
 )
+from archeo_topia.formats import LabelSchema
 
 MANIFEST = {
     "sheet_id": "K-35-1-A-a",
@@ -104,7 +104,10 @@ class TestAnnotationRecord:
 
     def test_boolean_attributes_default_false(self) -> None:
         record = annotation_record(1, 1, 1, [0.0, 0.0, 25.0, 23.0], None, 0.7)
-        assert all(record["attributes"][name] is False for name in BOOLEAN_ATTRIBUTES)
+        schema = LabelSchema.load("annotation/cvat/labels.json")
+        booleans = [name for name, kind in schema.gis_field_types("mound").items() if kind is bool]
+        assert booleans, "the schema declares no boolean attributes"
+        assert all(record["attributes"][name] is False for name in booleans)
 
     def test_confidence_is_carried_so_a_reviewer_can_sort(self) -> None:
         record = annotation_record(1, 1, 1, [0.0, 0.0, 25.0, 23.0], None, 0.58612)
@@ -130,27 +133,32 @@ class TestAnnotationRecord:
 
 
 class TestSchemaAgreement:
-    """Anything the exporter writes must be declared in the label schema.
+    """The exporter's attributes now come from the schema, not a parallel list.
 
-    CVAT drops or rejects attributes its project label set does not know about,
-    so an attribute that exists only in the exporter is silently lost on import.
+    This used to be a drift test between a literal block in this module and
+    ``annotation/cvat/labels.json``. It is now a statement of the property that
+    made the drift impossible: the exporter reads the schema, so every declared
+    attribute is emitted and no undeclared one can be.
     """
 
-    def test_every_emitted_attribute_is_declared(self) -> None:
-        import json
-        from pathlib import Path
-
-        import pytest
-
-        labels_path = Path("annotation/cvat/labels.json")
-        if not labels_path.exists():
-            pytest.skip("needs the label schema")
-
-        declared = {
-            label["name"]: {a["name"] for a in label["attributes"]}
-            for label in json.loads(labels_path.read_text(encoding="utf-8"))["labels"]
-        }
+    def test_emitted_attributes_are_exactly_what_the_schema_declares(self) -> None:
+        schema = LabelSchema.load("annotation/cvat/labels.json")
         mound = annotation_record(1, 1, 1, [0.0, 0.0, 25.0, 23.0], None, 0.9)
         negative = annotation_record(2, 1, 2, [0.0, 0.0, 25.0, 23.0], None, 0.1)
-        assert set(mound["attributes"]) <= declared["mound"]
-        assert set(negative["attributes"]) <= declared["hard_negative_symbol"]
+        assert set(mound["attributes"]) == set(schema.defaults("mound"))
+        assert set(negative["attributes"]) == set(schema.defaults("hard_negative_symbol"))
+
+    def test_a_new_schema_attribute_reaches_the_export_without_an_edit(self) -> None:
+        """The property the old drift test could only check after the fact."""
+        schema = LabelSchema.load("annotation/cvat/labels.json")
+        schema.label("mound")["attributes"].append(
+            {
+                "name": "invented_for_this_test",
+                "input_type": "checkbox",
+                "mutable": True,
+                "values": ["false"],
+                "default_value": "false",
+            }
+        )
+        record = annotation_record(1, 1, 1, [0.0, 0.0, 25.0, 23.0], None, 0.9, schema=schema)
+        assert record["attributes"]["invented_for_this_test"] is False

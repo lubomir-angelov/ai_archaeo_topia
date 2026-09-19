@@ -46,7 +46,9 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
+
+from archeo_topia.formats.coco import decode_mask as _decode_mask
 
 logger = logging.getLogger(__name__)
 
@@ -163,9 +165,11 @@ def sheet_of(file_name: str) -> str:
 def decode_mask(annotation: dict[str, Any], width: int, height: int) -> np.ndarray:
     """Rasterize a COCO annotation to a boolean mask.
 
-    Handles the two geometry encodings CVAT emits for this dataset:
-    uncompressed RLE (``segmentation`` as a dict, column-major run lengths) and
-    a single polygon. Annotations with no geometry return an empty mask.
+    Delegates to ``archeo_topia.formats.coco.decode_mask``, which is the one
+    decoder this project has. ``bbox_fallback=False`` preserves the behaviour
+    v0.1 to v0.5 were computed with: the v0.0.1 export carries one mound with a
+    box and no mask, and those runs counted it as having no geometry. See that
+    function's docstring.
 
     Args:
         annotation: COCO annotation dict.
@@ -175,30 +179,7 @@ def decode_mask(annotation: dict[str, Any], width: int, height: int) -> np.ndarr
     Returns:
         Boolean array of shape ``(height, width)``.
     """
-    segmentation = annotation.get("segmentation")
-    mask = np.zeros((height, width), dtype=bool)
-
-    if isinstance(segmentation, dict):
-        mask_h, mask_w = segmentation["size"]
-        flat = np.zeros(mask_h * mask_w, dtype=bool)
-        index = 0
-        filled = False
-        for run in segmentation["counts"]:
-            if filled:
-                flat[index : index + run] = True
-            index += run
-            filled = not filled
-        mask[:mask_h, :mask_w] = flat.reshape((mask_h, mask_w), order="F")
-    elif isinstance(segmentation, list) and segmentation and isinstance(segmentation[0], list):
-        points = segmentation[0]
-        if points:
-            canvas = Image.new("L", (width, height), 0)
-            ImageDraw.Draw(canvas).polygon(
-                [(points[i], points[i + 1]) for i in range(0, len(points), 2)], fill=1
-            )
-            mask = np.array(canvas) > 0
-
-    return mask
+    return _decode_mask(annotation, width, height, bbox_fallback=False)
 
 
 def component_groups(

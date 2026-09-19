@@ -123,6 +123,20 @@
           "default_value": "none"
         },
         {
+          "name": "review_status",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "unreviewed",
+            "confirmed",
+            "rejected",
+            "corrected",
+            "added"
+          ],
+          "default_value": "unreviewed",
+          "comment": "What a reviewer concluded, as distinct from annotation_provenance, which records who drew the shape. The two are independent axes and must not be collapsed: if a rejection were expressed by deleting the feature, a rejected detection would be indistinguishable from one that was never sent, and the recall denominator could not be reconstructed afterwards. Set by the team reviewing in QGIS or ArcGIS."
+        },
+        {
           "name": "annotation_provenance",
           "input_type": "select",
           "mutable": true,
@@ -138,7 +152,9 @@
           "name": "detector_confidence",
           "input_type": "text",
           "mutable": true,
-          "values": [],
+          "values": [
+            ""
+          ],
           "default_value": "",
           "comment": "The detector's confidence, carried on model proposals so a reviewer can sort by it and work the strongest candidates first. Empty on anything a human drew. It is provenance, not ground truth, and nothing downstream reads it as a label."
         }
@@ -277,6 +293,20 @@
           "default_value": "none"
         },
         {
+          "name": "review_status",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "unreviewed",
+            "confirmed",
+            "rejected",
+            "corrected",
+            "added"
+          ],
+          "default_value": "unreviewed",
+          "comment": "What a reviewer concluded, as distinct from annotation_provenance, which records who drew the shape. The two are independent axes and must not be collapsed: if a rejection were expressed by deleting the feature, a rejected detection would be indistinguishable from one that was never sent, and the recall denominator could not be reconstructed afterwards. Set by the team reviewing in QGIS or ArcGIS."
+        },
+        {
           "name": "annotation_provenance",
           "input_type": "select",
           "mutable": true,
@@ -292,7 +322,9 @@
           "name": "detector_confidence",
           "input_type": "text",
           "mutable": true,
-          "values": [],
+          "values": [
+            ""
+          ],
           "default_value": "",
           "comment": "The detector's confidence, carried on model proposals so a reviewer can sort by it and work the strongest candidates first. Empty on anything a human drew. It is provenance, not ground truth, and nothing downstream reads it as a label."
         }
@@ -426,6 +458,20 @@
           "default_value": "none"
         },
         {
+          "name": "review_status",
+          "input_type": "select",
+          "mutable": true,
+          "values": [
+            "unreviewed",
+            "confirmed",
+            "rejected",
+            "corrected",
+            "added"
+          ],
+          "default_value": "unreviewed",
+          "comment": "What a reviewer concluded, as distinct from annotation_provenance, which records who drew the shape. The two are independent axes and must not be collapsed: if a rejection were expressed by deleting the feature, a rejected detection would be indistinguishable from one that was never sent, and the recall denominator could not be reconstructed afterwards. Set by the team reviewing in QGIS or ArcGIS."
+        },
+        {
           "name": "annotation_provenance",
           "input_type": "select",
           "mutable": true,
@@ -441,7 +487,9 @@
           "name": "detector_confidence",
           "input_type": "text",
           "mutable": true,
-          "values": [],
+          "values": [
+            ""
+          ],
           "default_value": "",
           "comment": "The detector's confidence, carried on model proposals so a reviewer can sort by it and work the strongest candidates first. Empty on anything a human drew. It is provenance, not ground truth, and nothing downstream reads it as a label."
         }
