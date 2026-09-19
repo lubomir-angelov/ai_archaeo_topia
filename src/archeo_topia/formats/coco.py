@@ -107,9 +107,7 @@ def decode_rle(segmentation: dict[str, Any], height: int, width: int) -> np.ndar
     # a size equal to its image, so this rejects nothing that exists today.
     declared = tuple(segmentation.get("size", (height, width)))
     if declared != (height, width):
-        raise ValueError(
-            f"RLE size {declared} does not match the image ({height}, {width})"
-        )
+        raise ValueError(f"RLE size {declared} does not match the image ({height}, {width})")
 
     expected = height * width
     if sum(counts) != expected:
