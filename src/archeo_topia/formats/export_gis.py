@@ -52,6 +52,10 @@ logger = logging.getLogger(__name__)
 #: The schema of record.
 DEFAULT_SCHEMA = Path("annotation/cvat/labels.json")
 
+#: The permanent splits, so each feature can carry the one constraint that is
+#: invisible from the data itself: which sheets may be trained on.
+DEFAULT_SPLITS = Path("configs/splits/v0_6_splits.json")
+
 #: Sheets held back from the main delivery, with the reason shown to reviewers.
 #: K-34-47-G-v is central Sofia: it returned 957 / 140 / 418 candidates across
 #: the three v0.5 checkpoints where no other sheet exceeded 110, with 11-25%
@@ -119,6 +123,13 @@ work out how often the model was right.
 Return the `.gpkg` files. Keep the layer names and the CRS as they are; if your
 GIS offers to reproject on save, decline.
 
+## Two fields that are not for you
+
+`split` and `mound_id` are bookkeeping. Leave both alone. `split` records
+whether a sheet may be used to train the model — one sheet in this batch is
+marked `test` and is useful in the field but must never be trained on, which is
+why the field travels with the data rather than living in a note somewhere.
+
 ## `set_aside/`
 
 Sheets held back from the main batch, listed with a reason in
@@ -179,6 +190,13 @@ README_BG = """# Откривания на могили за преглед — 
 Върнете файловете `.gpkg`. Запазете имената на слоевете и координатната
 система; ако вашата ГИС предложи препроектиране при запис, откажете.
 
+## Две полета, които не са за вас
+
+`split` и `mound_id` са служебни. Не ги променяйте. `split` указва дали листът
+може да се използва за обучение на модела — един лист в тази партида е отбелязан
+като `test`: полезен е на терен, но никога не бива да се използва за обучение,
+затова полето пътува заедно с данните, а не в отделна бележка.
+
 ## `set_aside/`
 
 Листове, отделени от основната партида, с причина в `export_report.json`.
@@ -214,11 +232,27 @@ def load_candidates(path: Path, confidence: float) -> list[dict[str, Any]]:
     return [r for r in records if r["score"] >= confidence]
 
 
+def load_splits(path: Path = DEFAULT_SPLITS) -> dict[str, str]:
+    """Return the split each sheet belongs to.
+
+    Args:
+        path: The splits file.
+
+    Returns:
+        Sheet id to ``train``, ``val`` or ``test``; empty if the file is absent.
+    """
+    if not path.exists():
+        return {}
+    document = json.loads(path.read_text(encoding="utf-8"))
+    return {sheet: meta["split"] for sheet, meta in document.get("sheets", {}).items()}
+
+
 def build_layers(
     reference: SheetReference,
     candidates: list[dict[str, Any]],
     schema: LabelSchema,
     symbols: dict[int, list[float]] | None = None,
+    split: str = "",
 ) -> tuple[FeatureCollection, FeatureCollection]:
     """Build the point and symbol layers for one sheet.
 
@@ -227,6 +261,7 @@ def build_layers(
         candidates: Sweep candidates in sheet-pixel coordinates.
         schema: Label schema supplying attribute defaults.
         symbols: Optional map from candidate index to a flat sheet-pixel ring.
+        split: The sheet's split, carried onto every feature.
 
     Returns:
         ``(mound_points, mound_symbols)``.
@@ -255,6 +290,12 @@ def build_layers(
                 "detector_confidence": round(candidate["score"], 4),
                 "annotation_provenance": "model_proposal_accepted",
                 "review_status": "unreviewed",
+                # Not for the reviewer: a sheet in the test split may be
+                # reviewed and used in the field, but its labels must never
+                # enter training. K-35-39-A-g is the case -- it shares a 1:100k
+                # parent with two blind test sheets, so training on it would be
+                # the leak the parent grouping exists to prevent.
+                "split": split,
             }
         )
         points.add(point(*ground), **properties)
@@ -313,6 +354,7 @@ def export_sheet(
     schema: LabelSchema,
     confidence: float,
     symbols: dict[int, list[float]] | None = None,
+    split: str = "",
 ) -> dict[str, Any]:
     """Write one sheet's GeoPackage and portable GeoJSON.
 
@@ -324,13 +366,14 @@ def export_sheet(
         schema: Label schema.
         confidence: Lowest confidence to export.
         symbols: Optional symbol rings by candidate index.
+        split: The sheet's split.
 
     Returns:
         A summary row.
     """
     reference = SheetReference.from_clips_json(clips_dir)
     candidates = load_candidates(candidates_path, confidence)
-    points, shapes = build_layers(reference, candidates, schema, symbols)
+    points, shapes = build_layers(reference, candidates, schema, symbols, split)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     gpkg = output_dir / f"{sheet_id}.gpkg"
@@ -347,6 +390,7 @@ def export_sheet(
         "candidates": len(candidates),
         "points": len(points),
         "symbols": len(shapes),
+        "split": split,
         "set_aside": SET_ASIDE.get(sheet_id, ""),
     }
 
@@ -358,6 +402,7 @@ def main() -> None:
     parser.add_argument("--clips-root", required=True, help="Directory of per-sheet clip folders")
     parser.add_argument("--output", required=True)
     parser.add_argument("--schema", default=str(DEFAULT_SCHEMA))
+    parser.add_argument("--splits", default=str(DEFAULT_SPLITS))
     parser.add_argument("--confidence", type=float, default=0.05)
     parser.add_argument("--symbols", help="Optional JSON of decoded symbol rings per sheet")
     parser.add_argument("--log-level", default="INFO")
@@ -366,6 +411,7 @@ def main() -> None:
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(message)s")
 
     schema = LabelSchema.load(args.schema)
+    splits = load_splits(Path(args.splits))
     sweep = Path(args.candidates)
     clips_root = Path(args.clips_root)
     output = Path(args.output)
@@ -388,6 +434,7 @@ def main() -> None:
             schema,
             args.confidence,
             rings or None,
+            splits.get(sheet_id, ""),
         )
         rows.append(row)
         logger.info(
@@ -407,6 +454,9 @@ def main() -> None:
                 "points": sum(r["points"] for r in rows),
                 "symbols": sum(r["symbols"] for r in rows),
                 "set_aside": {k: v for k, v in SET_ASIDE.items()},
+                "held_out_of_training": sorted(
+                    r["sheet_id"] for r in rows if r["split"] == "test"
+                ),
                 "rows": rows,
             },
             indent=2,

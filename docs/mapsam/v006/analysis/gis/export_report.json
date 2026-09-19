@@ -1,0 +1,518 @@
+{
+  "confidence": 0.05,
+  "sheets": 56,
+  "points": 4100,
+  "symbols": 4100,
+  "set_aside": {
+    "K-34-47-G-v": "dense urban fabric (central Sofia); candidate rate an order of magnitude high"
+  },
+  "held_out_of_training": [
+    "K-35-39-A-g"
+  ],
+  "rows": [
+    {
+      "sheet_id": "K-34-10-A-g",
+      "crs": "EPSG:25835",
+      "candidates": 32,
+      "points": 32,
+      "symbols": 32,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-22-V-b",
+      "crs": "EPSG:25835",
+      "candidates": 35,
+      "points": 35,
+      "symbols": 35,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-23-A-g",
+      "crs": "EPSG:25835",
+      "candidates": 22,
+      "points": 22,
+      "symbols": 22,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-24-G-a",
+      "crs": "EPSG:25835",
+      "candidates": 22,
+      "points": 22,
+      "symbols": 22,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-35-A-v",
+      "crs": "EPSG:25835",
+      "candidates": 18,
+      "points": 18,
+      "symbols": 18,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-36-V-b",
+      "crs": "EPSG:25835",
+      "candidates": 87,
+      "points": 87,
+      "symbols": 87,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-47-A-a",
+      "crs": "EPSG:25835",
+      "candidates": 37,
+      "points": 37,
+      "symbols": 37,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-47-G-g",
+      "crs": "EPSG:25835",
+      "candidates": 72,
+      "points": 72,
+      "symbols": 72,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-47-G-v",
+      "crs": "EPSG:25835",
+      "candidates": 1651,
+      "points": 1651,
+      "symbols": 1651,
+      "split": "val",
+      "set_aside": "dense urban fabric (central Sofia); candidate rate an order of magnitude high"
+    },
+    {
+      "sheet_id": "K-34-48-G-b",
+      "crs": "EPSG:25835",
+      "candidates": 12,
+      "points": 12,
+      "symbols": 12,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-58-B-a",
+      "crs": "EPSG:25835",
+      "candidates": 52,
+      "points": 52,
+      "symbols": 52,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-60-V-b",
+      "crs": "EPSG:25835",
+      "candidates": 54,
+      "points": 54,
+      "symbols": 54,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-70-B-v",
+      "crs": "EPSG:25835",
+      "candidates": 71,
+      "points": 71,
+      "symbols": 71,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-83-V-g",
+      "crs": "EPSG:25835",
+      "candidates": 32,
+      "points": 32,
+      "symbols": 32,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-84-A-a",
+      "crs": "EPSG:25835",
+      "candidates": 52,
+      "points": 52,
+      "symbols": 52,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-34-96-B-v",
+      "crs": "EPSG:25835",
+      "candidates": 66,
+      "points": 66,
+      "symbols": 66,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-13-G-v",
+      "crs": "EPSG:25835",
+      "candidates": 30,
+      "points": 30,
+      "symbols": 30,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-14-B-v",
+      "crs": "EPSG:25835",
+      "candidates": 21,
+      "points": 21,
+      "symbols": 21,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-16-A-a",
+      "crs": "EPSG:25835",
+      "candidates": 22,
+      "points": 22,
+      "symbols": 22,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-16-B-a",
+      "crs": "EPSG:25835",
+      "candidates": 15,
+      "points": 15,
+      "symbols": 15,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-18-A-b",
+      "crs": "EPSG:25835",
+      "candidates": 12,
+      "points": 12,
+      "symbols": 12,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-19-V-a",
+      "crs": "EPSG:25835",
+      "candidates": 44,
+      "points": 44,
+      "symbols": 44,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-20-B-g",
+      "crs": "EPSG:25835",
+      "candidates": 113,
+      "points": 113,
+      "symbols": 113,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-21-G-a",
+      "crs": "EPSG:25835",
+      "candidates": 83,
+      "points": 83,
+      "symbols": 83,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-27-B-b",
+      "crs": "EPSG:25835",
+      "candidates": 84,
+      "points": 84,
+      "symbols": 84,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-28-A-g",
+      "crs": "EPSG:25835",
+      "candidates": 49,
+      "points": 49,
+      "symbols": 49,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-29-G-b",
+      "crs": "EPSG:25835",
+      "candidates": 23,
+      "points": 23,
+      "symbols": 23,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-31-V-g",
+      "crs": "EPSG:25835",
+      "candidates": 36,
+      "points": 36,
+      "symbols": 36,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-32-A-a",
+      "crs": "EPSG:25835",
+      "candidates": 61,
+      "points": 61,
+      "symbols": 61,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-38-A-a",
+      "crs": "EPSG:25835",
+      "candidates": 89,
+      "points": 89,
+      "symbols": 89,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-39-A-g",
+      "crs": "EPSG:25835",
+      "candidates": 23,
+      "points": 23,
+      "symbols": 23,
+      "split": "test",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-40-B-v",
+      "crs": "EPSG:25835",
+      "candidates": 19,
+      "points": 19,
+      "symbols": 19,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-41-G-a",
+      "crs": "EPSG:25835",
+      "candidates": 7,
+      "points": 7,
+      "symbols": 7,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-42-A-g",
+      "crs": "EPSG:25835",
+      "candidates": 21,
+      "points": 21,
+      "symbols": 21,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-43-V-g",
+      "crs": "EPSG:25835",
+      "candidates": 40,
+      "points": 40,
+      "symbols": 40,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-44-B-a",
+      "crs": "EPSG:25835",
+      "candidates": 28,
+      "points": 28,
+      "symbols": 28,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-49-V-g",
+      "crs": "EPSG:25835",
+      "candidates": 63,
+      "points": 63,
+      "symbols": 63,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-5-G-b",
+      "crs": "EPSG:25835",
+      "candidates": 9,
+      "points": 9,
+      "symbols": 9,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-50-B-b",
+      "crs": "EPSG:25835",
+      "candidates": 79,
+      "points": 79,
+      "symbols": 79,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-50-V-b",
+      "crs": "EPSG:25835",
+      "candidates": 57,
+      "points": 57,
+      "symbols": 57,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-51-A-b",
+      "crs": "EPSG:25835",
+      "candidates": 118,
+      "points": 118,
+      "symbols": 118,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-51-B-g",
+      "crs": "EPSG:25835",
+      "candidates": 26,
+      "points": 26,
+      "symbols": 26,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-52-G-v",
+      "crs": "EPSG:25835",
+      "candidates": 70,
+      "points": 70,
+      "symbols": 70,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-53-A-g",
+      "crs": "EPSG:25835",
+      "candidates": 42,
+      "points": 42,
+      "symbols": 42,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-55-A-g",
+      "crs": "EPSG:25835",
+      "candidates": 50,
+      "points": 50,
+      "symbols": 50,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-62-G-v",
+      "crs": "EPSG:25835",
+      "candidates": 26,
+      "points": 26,
+      "symbols": 26,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-63-B-g",
+      "crs": "EPSG:25835",
+      "candidates": 58,
+      "points": 58,
+      "symbols": 58,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-66-A-a",
+      "crs": "EPSG:25835",
+      "candidates": 70,
+      "points": 70,
+      "symbols": 70,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-67-B-v",
+      "crs": "EPSG:25835",
+      "candidates": 58,
+      "points": 58,
+      "symbols": 58,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-73-A-v",
+      "crs": "EPSG:25835",
+      "candidates": 7,
+      "points": 7,
+      "symbols": 7,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-75-B-a",
+      "crs": "EPSG:25835",
+      "candidates": 37,
+      "points": 37,
+      "symbols": 37,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-77-A-g",
+      "crs": "EPSG:25835",
+      "candidates": 62,
+      "points": 62,
+      "symbols": 62,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-8-V-g",
+      "crs": "EPSG:25835",
+      "candidates": 46,
+      "points": 46,
+      "symbols": 46,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-86-A-b",
+      "crs": "EPSG:25835",
+      "candidates": 37,
+      "points": 37,
+      "symbols": 37,
+      "split": "train",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-87-G-a",
+      "crs": "EPSG:25835",
+      "candidates": 38,
+      "points": 38,
+      "symbols": 38,
+      "split": "val",
+      "set_aside": ""
+    },
+    {
+      "sheet_id": "K-35-88-G-g",
+      "crs": "EPSG:25835",
+      "candidates": 12,
+      "points": 12,
+      "symbols": 12,
+      "split": "train",
+      "set_aside": ""
+    }
+  ]
+}
