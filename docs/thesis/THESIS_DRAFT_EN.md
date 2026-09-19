@@ -280,7 +280,7 @@ whose own publications are the natural anchor for this section `[verify]`.
 
 **Argument:** classical pipelines — colour separation, morphological filtering,
 template matching, Hough-type accumulators — are what the field used before deep
-learning, and they are exactly what §4.6 benchmarks against. Explain *why* they
+learning, and they are exactly what §5.5 benchmarks against. Explain *why* they
 degrade on this material: a scanned archival sheet has no clean colour
 separation, the symbol is small and drawn by hand-set drafting conventions that
 vary between print runs, and the background is dense with contours, grid lines,
