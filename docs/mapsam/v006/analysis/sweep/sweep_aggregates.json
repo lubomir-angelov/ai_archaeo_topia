@@ -1,0 +1,60 @@
+{
+  "foldA_last": {
+    "sheets": 56,
+    "windows_swept": 8671,
+    "windows_dropped_transparent": 0,
+    "megapixels": 1232.4,
+    "candidates_at_0_05": 4504,
+    "candidates_at_0_10": 3671,
+    "candidates_at_0_25": 2593,
+    "per_window_at_0_05": 0.5194,
+    "per_window_at_0_10": 0.4234,
+    "per_window_at_0_25": 0.299,
+    "per_megapixel_at_0_05": 3.6545,
+    "per_megapixel_at_0_10": 2.9786,
+    "per_megapixel_at_0_25": 2.1039,
+    "per_sheet_per_megapixel_at_0_25_median": 1.0429,
+    "per_sheet_per_megapixel_at_0_25_max": 41.4185
+  },
+  "foldB_last": {
+    "sheets": 56,
+    "windows_swept": 8671,
+    "windows_dropped_transparent": 0,
+    "megapixels": 1232.4,
+    "candidates_at_0_05": 2511,
+    "candidates_at_0_10": 2035,
+    "candidates_at_0_25": 1613,
+    "per_window_at_0_05": 0.2896,
+    "per_window_at_0_10": 0.2347,
+    "per_window_at_0_25": 0.186,
+    "per_megapixel_at_0_05": 2.0374,
+    "per_megapixel_at_0_10": 1.6512,
+    "per_megapixel_at_0_25": 1.3088,
+    "per_sheet_per_megapixel_at_0_25_median": 0.747,
+    "per_sheet_per_megapixel_at_0_25_max": 6.0591
+  },
+  "foldC_last": {
+    "sheets": 56,
+    "windows_swept": 8671,
+    "windows_dropped_transparent": 0,
+    "megapixels": 1232.4,
+    "candidates_at_0_05": 4100,
+    "candidates_at_0_10": 3009,
+    "candidates_at_0_25": 2062,
+    "per_window_at_0_05": 0.4728,
+    "per_window_at_0_10": 0.347,
+    "per_window_at_0_25": 0.2378,
+    "per_megapixel_at_0_05": 3.3267,
+    "per_megapixel_at_0_10": 2.4415,
+    "per_megapixel_at_0_25": 1.6731,
+    "per_sheet_per_megapixel_at_0_25_median": 1.0338,
+    "per_sheet_per_megapixel_at_0_25_max": 18.0908
+  },
+  "cross_checkpoint_agreement_10px_conf_0_25": {
+    "foldC_confirmed_by_foldA_median": 0.7663,
+    "foldC_confirmed_by_foldB_median": 0.8131,
+    "foldA_confirmed_by_foldC_median": 0.9035,
+    "sheets_above_0_75_both_ways": 27,
+    "sheets": 56
+  }
+}

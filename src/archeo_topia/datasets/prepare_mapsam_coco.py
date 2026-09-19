@@ -30,6 +30,8 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageDraw
 
+from archeo_topia.formats.coco import decode_rle as _decode_rle
+
 logger = logging.getLogger(__name__)
 
 SPLIT_RATIOS = {"train": 0.70, "val": 0.15, "test": 0.15}
@@ -175,7 +177,10 @@ def decode_uncompressed_coco_rle(
 ) -> np.ndarray:
     """Decode uncompressed COCO RLE into a binary mask.
 
-    COCO RLE is column-major / Fortran-order. The first count is background.
+    Delegates to ``archeo_topia.formats.coco.decode_rle``, which is the one
+    implementation of this algorithm in the project; this module and
+    ``build_detection_windows`` each carried their own before, with different
+    validation and different failure behaviour.
 
     Args:
         segmentation: RLE dict with ``size`` and ``counts`` keys.
@@ -190,34 +195,8 @@ def decode_uncompressed_coco_rle(
         ValueError: If counts is not a list, sum of counts does not match
             image dimensions, or a negative count is found.
     """
-    counts = segmentation["counts"]
-
-    if not isinstance(counts, list):
-        raise ValueError(
-            "Compressed COCO RLE is not supported by this decoder. "
-            "Expected segmentation['counts'] to be a list of integers."
-        )
-
-    expected_pixels = image_height * image_width
-    total_pixels = sum(counts)
-    if total_pixels != expected_pixels:
-        raise ValueError(
-            f"Invalid RLE counts: sum(counts)={total_pixels} != height*width={expected_pixels}"
-        )
-
-    flat = np.zeros(expected_pixels, dtype=np.uint8)
-    index = 0
-    value = 0
-
-    for count in counts:
-        if count < 0:
-            raise ValueError(f"Invalid negative RLE count: {count}")
-        if value == 1:
-            flat[index : index + count] = 255
-        index += count
-        value = 1 - value
-
-    return flat.reshape((image_height, image_width), order="F")
+    mask = _decode_rle(segmentation, image_height, image_width)
+    return (mask.astype(np.uint8)) * 255
 
 
 def decode_rle_mask(rle: dict[str, Any], height: int, width: int) -> Image.Image:

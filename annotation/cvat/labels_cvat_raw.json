@@ -1,0 +1,482 @@
+[
+  {
+    "name": "mound",
+    "color": "#33ddff",
+    "type": "polygon",
+    "attributes": [
+      {
+        "name": "affected_by_colored_pencil",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "blurred_or_bad_print",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_contour",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_forestation_line",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_grid",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_powerline",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_road",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "has_absolute_elevation_mark",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "has_relative_height_mark",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "has_trig_point",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "overlaps_other_mound",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "water_line_crossing",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "none",
+          "surface",
+          "underground",
+          "unreviewed"
+        ],
+        "default_value": "none"
+      },
+      {
+        "name": "review_status",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "unreviewed",
+          "confirmed",
+          "rejected",
+          "corrected",
+          "added"
+        ],
+        "default_value": "unreviewed"
+      },
+      {
+        "name": "annotation_provenance",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "human_added",
+          "model_proposal_accepted",
+          "model_proposal_corrected"
+        ],
+        "default_value": "human_added"
+      },
+      {
+        "name": "detector_confidence",
+        "mutable": true,
+        "input_type": "text",
+        "values": [
+          ""
+        ],
+        "default_value": ""
+      }
+    ]
+  },
+  {
+    "name": "hard_negative_symbol",
+    "color": "#fa3253",
+    "type": "rectangle",
+    "attributes": [
+      {
+        "name": "affected_by_colored_pencil",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "blurred_or_bad_print",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_contour",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_forestation_line",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_grid",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_powerline",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_road",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "has_absolute_elevation_mark",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "has_relative_height_mark",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "has_trig_point",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "negative_type",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "decorative_symbol",
+          "trig_point",
+          "road",
+          "text",
+          "contour",
+          "grid",
+          "colored_pencil",
+          "other"
+        ],
+        "default_value": "other"
+      },
+      {
+        "name": "overlaps_other_mound",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "water_line_crossing",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "none",
+          "surface",
+          "underground",
+          "unreviewed"
+        ],
+        "default_value": "none"
+      },
+      {
+        "name": "review_status",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "unreviewed",
+          "confirmed",
+          "rejected",
+          "corrected",
+          "added"
+        ],
+        "default_value": "unreviewed"
+      },
+      {
+        "name": "annotation_provenance",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "human_added",
+          "model_proposal_accepted",
+          "model_proposal_corrected"
+        ],
+        "default_value": "human_added"
+      },
+      {
+        "name": "detector_confidence",
+        "mutable": true,
+        "input_type": "text",
+        "values": [
+          ""
+        ],
+        "default_value": ""
+      }
+    ]
+  },
+  {
+    "name": "uncertain_ignore",
+    "color": "#ffcc33",
+    "type": "rectangle",
+    "attributes": [
+      {
+        "name": "affected_by_colored_pencil",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "blurred_or_bad_print",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_contour",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_forestation_line",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_grid",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_powerline",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "crossed_by_road",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "has_absolute_elevation_mark",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "has_relative_height_mark",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "has_trig_point",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "overlaps_other_mound",
+        "mutable": true,
+        "input_type": "checkbox",
+        "values": [
+          "false"
+        ],
+        "default_value": "false"
+      },
+      {
+        "name": "reason",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "possible_false_positive",
+          "ambiguous_symbol",
+          "other"
+        ],
+        "default_value": "possible_false_positive"
+      },
+      {
+        "name": "water_line_crossing",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "none",
+          "surface",
+          "underground",
+          "unreviewed"
+        ],
+        "default_value": "none"
+      },
+      {
+        "name": "review_status",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "unreviewed",
+          "confirmed",
+          "rejected",
+          "corrected",
+          "added"
+        ],
+        "default_value": "unreviewed"
+      },
+      {
+        "name": "annotation_provenance",
+        "mutable": true,
+        "input_type": "select",
+        "values": [
+          "human_added",
+          "model_proposal_accepted",
+          "model_proposal_corrected"
+        ],
+        "default_value": "human_added"
+      },
+      {
+        "name": "detector_confidence",
+        "mutable": true,
+        "input_type": "text",
+        "values": [
+          ""
+        ],
+        "default_value": ""
+      }
+    ]
+  }
+]
