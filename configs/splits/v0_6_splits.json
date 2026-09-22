@@ -1,11 +1,11 @@
 {
-  "version": "v0.6",
+  "version": "v0.7",
   "grouping": "1:100k parent sheet",
   "rationale": "Adjacent 1:25k quadrants of the same 1:50k sheet share terrain, survey campaign, print run and scan batch, so splitting on the 1:25k sheet id is a weaker separation than the ids suggest. K-35-51-B-g and the annotated K-35-51-B-a are exactly that pair. Grouping on the 1:100k parent costs nothing and removes the doubt.",
   "test_note": "The test group is the four blind-annotated frozen sheets plus K-35-39-A-g, which shares the parent K-35-39 with two of them. K-35-39-A-g is not annotated and contributes no evaluation instances; it is held out rather than trained on, because training on a sheet that shares a parent with two blind test sheets is the leak this grouping exists to prevent.",
   "counts": {
     "test": 5,
-    "train": 45,
+    "train": 46,
     "val": 13
   },
   "parents": {
@@ -79,6 +79,7 @@
       "K-35-66-A-a",
       "K-35-73-A-v",
       "K-35-75-B-a",
+      "K-35-75-B-g",
       "K-35-77-A-g",
       "K-35-8-G-a",
       "K-35-8-V-g",
@@ -885,6 +886,20 @@
       "width": 4969,
       "height": 4458,
       "m_per_px": 2.1209,
+      "annotated": false,
+      "mounds": null,
+      "split": "train",
+      "frozen_blind_test": false,
+      "scale": "1:25000",
+      "series": "Bulgarian archival topographic",
+      "crs": "EPSG:25835"
+    },
+    "K-35-75-B-g": {
+      "parent": "K-35-75",
+      "source_set": "root_20260922",
+      "width": 4955,
+      "height": 4437,
+      "m_per_px": 2.1272,
       "annotated": false,
       "mounds": null,
       "split": "train",

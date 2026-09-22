@@ -161,7 +161,21 @@ class TestSplits:
 
     def test_every_sheet_has_exactly_one_split(self, splits: dict) -> None:
         assigned = [s for names in splits["splits"].values() for s in names]
-        assert len(assigned) == len(set(assigned)) == len(splits["sheets"]) == 63
+        assert len(assigned) == len(set(assigned)) == len(splits["sheets"])
+        assert set(assigned) == set(splits["sheets"])
+
+    def test_the_recorded_counts_match_the_lists(self, splits: dict) -> None:
+        """The corpus size is not pinned to a literal here on purpose.
+
+        It was, at 63, and adding one sheet to the working pool failed a test
+        whose subject is whether a sheet can end up in two splits or none. What
+        is worth guarding is the agreement between the three places a split is
+        written down, which catches a sheet dropped from a list just as well and
+        does not need editing every time the corpus grows.
+        """
+        for split, names in splits["splits"].items():
+            assert splits["counts"][split] == len(names)
+            assert all(splits["sheets"][s]["split"] == split for s in names)
 
     def test_no_parent_spans_two_splits(self, splits: dict) -> None:
         """The whole point of the grouping.
