@@ -135,7 +135,8 @@
         "values": [
           "human_added",
           "model_proposal_accepted",
-          "model_proposal_corrected"
+          "model_proposal_corrected",
+          "model_proposal_rejected"
         ],
         "default_value": "human_added"
       },
@@ -257,7 +258,8 @@
           "contour",
           "grid",
           "colored_pencil",
-          "other"
+          "other",
+          "unreviewed"
         ],
         "default_value": "other"
       },
@@ -302,7 +304,8 @@
         "values": [
           "human_added",
           "model_proposal_accepted",
-          "model_proposal_corrected"
+          "model_proposal_corrected",
+          "model_proposal_rejected"
         ],
         "default_value": "human_added"
       },
@@ -464,7 +467,8 @@
         "values": [
           "human_added",
           "model_proposal_accepted",
-          "model_proposal_corrected"
+          "model_proposal_corrected",
+          "model_proposal_rejected"
         ],
         "default_value": "human_added"
       },

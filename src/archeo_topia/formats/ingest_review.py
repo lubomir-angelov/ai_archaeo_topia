@@ -31,8 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from archeo_topia.formats.coco import CocoDocument
-from archeo_topia.formats.features import FeatureCollection
+from archeo_topia.formats.coco import HARD_NEGATIVE, MOUND, CocoDocument
+from archeo_topia.formats.features import Feature, FeatureCollection
 from archeo_topia.formats.georeference import SheetReference
 from archeo_topia.formats.labels import REVIEW_STATUS, LabelSchema
 
@@ -48,6 +48,36 @@ UNREVIEWED = "unreviewed"
 #: A feature that moved further than this from its original position is treated
 #: as relocated rather than nudged. Generous next to a ~53 m mound symbol.
 MOVED_THRESHOLD_M = 25.0
+
+#: The attribute saying what kind of non-mound a negative is.
+NEGATIVE_TYPE = "negative_type"
+
+#: What a rejected proposal's ``negative_type`` becomes.
+#:
+#: A rejection says "not a mound". It does not say which kind of symbol it is,
+#: and the reviewer's form never asked -- the form is generated from the
+#: ``mound`` label, which has no ``negative_type``. ``other`` is a real category
+#: carrying 17 annotations, so defaulting to it would make those
+#: indistinguishable from symbols nobody has typed. This is the reasoning that
+#: made ``water_line_crossing`` a four-value select rather than two booleans,
+#: and the value doubles as the work queue for a later typing pass in CVAT.
+UNTYPED_NEGATIVE = "unreviewed"
+
+#: The attribute saying who produced a shape, as opposed to what a reviewer
+#: concluded about it.
+PROVENANCE = "annotation_provenance"
+
+#: Provenance implied by each verdict. ``export_gis`` stamps every proposal
+#: ``model_proposal_accepted`` at delivery time, before anyone has accepted
+#: anything, which reads as a contradiction on a feature that comes back
+#: rejected. The verdict is the authority, so it is applied here rather than
+#: trusted from the returned file.
+PROVENANCE_BY_VERDICT = {
+    CONFIRMED: "model_proposal_accepted",
+    CORRECTED: "model_proposal_corrected",
+    ADDED: "human_added",
+    REJECTED: "model_proposal_rejected",
+}
 
 
 @dataclass
@@ -190,36 +220,92 @@ def check(
     return report
 
 
+def _selected(
+    returned: FeatureCollection,
+    verdicts: tuple[str, ...],
+    extra: dict[str, Any] | None = None,
+) -> FeatureCollection:
+    """Select features by verdict and stamp their provenance.
+
+    Args:
+        returned: The reviewed features.
+        verdicts: Which ``review_status`` values to take.
+        extra: Attributes to set on every selected feature.
+
+    Returns:
+        A collection carrying copies, so the caller's features are untouched.
+    """
+    features = []
+    for feature in returned.features:
+        verdict = str(feature.properties.get(REVIEW_STATUS, ""))
+        if verdict not in verdicts:
+            continue
+        properties = dict(feature.properties)
+        properties[PROVENANCE] = PROVENANCE_BY_VERDICT.get(
+            verdict, properties.get(PROVENANCE, "")
+        )
+        properties.update(extra or {})
+        features.append(Feature(geometry=feature.geometry, properties=properties))
+    return FeatureCollection(features=features, crs=returned.crs, name=returned.name)
+
+
 def to_coco(
     returned: FeatureCollection,
     reference: SheetReference,
     schema: LabelSchema,
     keep: tuple[str, ...] = (CONFIRMED, CORRECTED, ADDED),
+    negatives: tuple[str, ...] = (REJECTED,),
 ) -> CocoDocument:
-    """Turn accepted verdicts into a COCO document for CVAT.
+    """Turn every verdict into a COCO document for CVAT.
+
+    **Rejections are kept, not dropped.** They are the most useful negatives the
+    project can obtain: symbols this detector actually fired on, as opposed to
+    the 530 picked out by hand before any model existed. Discarding them, which
+    is what this function did until v0.6, left the review producing a precision
+    figure and no training data. They come back as ``hard_negative_symbol``,
+    which shares all 15 of ``mound``'s attributes, so everything the reviewer
+    filled in transfers and only ``negative_type`` has to be supplied.
 
     Args:
         returned: The reviewed features.
         reference: The sheet's clip geometry.
         schema: Label schema.
-        keep: Which verdicts become mound annotations.
+        keep: Verdicts that become ``mound`` annotations.
+        negatives: Verdicts that become ``hard_negative_symbol`` annotations.
+            Pass an empty tuple to restore the pre-v0.6 behaviour.
 
     Returns:
-        The document.
+        A document holding both categories.
     """
-    accepted = FeatureCollection(
-        features=[
-            f for f in returned.features if str(f.properties.get(REVIEW_STATUS, "")) in keep
-        ],
-        crs=returned.crs,
-        name=returned.name,
-    )
-    return CocoDocument.from_features(
-        accepted,
+    document = CocoDocument.from_features(
+        _selected(returned, keep),
         reference,
         schema=schema,
-        description=f"Field-reviewed mounds for {reference.sheet_id}",
+        category=MOUND,
+        description=f"Field-reviewed mounds and rejected proposals for {reference.sheet_id}",
     )
+    if not negatives:
+        return document
+
+    rejected = CocoDocument.from_features(
+        _selected(returned, negatives, {NEGATIVE_TYPE: UNTYPED_NEGATIVE}),
+        reference,
+        schema=schema,
+        category=HARD_NEGATIVE,
+    )
+    # Both documents build their images from reference.clips, so the ids agree;
+    # going through the file name anyway means they do not have to.
+    target = {image["file_name"]: image["id"] for image in document.images}
+    source = {image["id"]: image["file_name"] for image in rejected.images}
+    for annotation in rejected.annotations:
+        document.add_annotation(
+            image_id=target[source[annotation["image_id"]]],
+            category=HARD_NEGATIVE,
+            bbox=annotation["bbox"],
+            segmentation=annotation["segmentation"] or None,
+            attributes=annotation["attributes"],
+        )
+    return document
 
 
 def main() -> None:
@@ -254,8 +340,10 @@ def main() -> None:
     if report.precision is not None:
         logger.info("precision %.3f, recall floor %s", report.precision, report.recall_floor)
 
-    to_coco(returned, reference, schema).save(output / "instances_default.json")
-    logger.info("wrote %s", output)
+    document = to_coco(returned, reference, schema)
+    document.save(output / "instances_default.json")
+    by_category = Counter(document.category_names[a["category_id"]] for a in document.annotations)
+    logger.info("wrote %s: %s", output, dict(by_category))
 
 
 if __name__ == "__main__":

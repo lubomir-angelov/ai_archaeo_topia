@@ -1,6 +1,6 @@
 {
-  "schema_version": "v0.0.3",
-  "note": "The label schema for this project had no machine-readable form until v0.6: it existed only implicitly inside the CVAT COCO exports, and the attribute list written into docs/annotation/PROTOCOL_EN.md had drifted away from it. This file is generated from annotation/cvat/v0.0.3/instances_default.json and is the source of truth from here on. Import it into CVAT as the project label set. annotation/archaeology_symbols_v1.yaml is NOT this schema -- it belongs to the unused SAM2 proposal path and nothing in MapSAM reads it.",
+  "schema_version": "v0.0.4",
+  "note": "The label schema for this project had no machine-readable form until v0.6: it existed only implicitly inside the CVAT COCO exports, and the attribute list written into docs/annotation/PROTOCOL_EN.md had drifted away from it. First generated from annotation/cvat/v0.0.3/instances_default.json; hand-maintained and the source of truth from here on. Import it into CVAT as the project label set. v0.0.4 is additive: it adds negative_type=unreviewed, for a negative nobody has typed yet, and annotation_provenance=model_proposal_rejected, for a proposal a reviewer turned down. No existing annotation changes and no default changes, so v0.0.3 exports stay valid against it. annotation/archaeology_symbols_v1.yaml is NOT this schema -- it belongs to the unused SAM2 proposal path and nothing in MapSAM reads it.",
   "builtin_attributes_excluded": [
     "occluded",
     "rotation"
@@ -143,7 +143,8 @@
           "values": [
             "human_added",
             "model_proposal_accepted",
-            "model_proposal_corrected"
+            "model_proposal_corrected",
+            "model_proposal_rejected"
           ],
           "default_value": "human_added",
           "comment": "How this annotation came to exist. The human_added rate on model-assisted sheets, measured against the blind test set, is the estimate of the bias assisted annotation introduces. Without this field that question cannot be answered after the fact."
@@ -267,7 +268,8 @@
             "contour",
             "grid",
             "colored_pencil",
-            "other"
+            "other",
+            "unreviewed"
           ],
           "default_value": "other"
         },
@@ -313,7 +315,8 @@
           "values": [
             "human_added",
             "model_proposal_accepted",
-            "model_proposal_corrected"
+            "model_proposal_corrected",
+            "model_proposal_rejected"
           ],
           "default_value": "human_added",
           "comment": "How this annotation came to exist. The human_added rate on model-assisted sheets, measured against the blind test set, is the estimate of the bias assisted annotation introduces. Without this field that question cannot be answered after the fact."
@@ -478,7 +481,8 @@
           "values": [
             "human_added",
             "model_proposal_accepted",
-            "model_proposal_corrected"
+            "model_proposal_corrected",
+            "model_proposal_rejected"
           ],
           "default_value": "human_added",
           "comment": "How this annotation came to exist. The human_added rate on model-assisted sheets, measured against the blind test set, is the estimate of the bias assisted annotation introduces. Without this field that question cannot be answered after the fact."

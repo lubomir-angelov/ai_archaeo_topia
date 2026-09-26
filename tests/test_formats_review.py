@@ -15,7 +15,11 @@ from archeo_topia.formats.ingest_review import (
     ADDED,
     CONFIRMED,
     CORRECTED,
+    NEGATIVE_TYPE,
+    PROVENANCE,
+    PROVENANCE_BY_VERDICT,
     REJECTED,
+    UNTYPED_NEGATIVE,
     check,
     to_coco,
 )
@@ -158,20 +162,92 @@ class TestIntegrity:
 class TestToCoco:
     """Verdicts landing in CVAT beside the existing annotations."""
 
-    def test_only_accepted_verdicts_become_annotations(self, tmp_path: Path) -> None:
-        schema = LabelSchema.load("annotation/cvat/labels.json")
-        original = delivered()
-        returned = copy.deepcopy(original)
-        for feature, status in zip(
-            returned.features, [CONFIRMED, REJECTED, CORRECTED, "unreviewed"], strict=True
-        ):
+    @staticmethod
+    def reviewed(statuses: list[str]) -> FeatureCollection:
+        """The delivered proposals, with a verdict on each."""
+        returned = copy.deepcopy(delivered())
+        for feature, status in zip(returned.features, statuses, strict=True):
             feature.properties[REVIEW_STATUS] = status
-        document = to_coco(returned, reference(tmp_path), schema)
-        assert len(document.annotations) == 2
-        assert {a["attributes"][REVIEW_STATUS] for a in document.annotations} == {
+        return returned
+
+    @staticmethod
+    def by_category(document) -> dict[str, list[dict]]:
+        """Group a document's annotations by category name."""
+        names = document.category_names
+        grouped: dict[str, list[dict]] = {}
+        for annotation in document.annotations:
+            grouped.setdefault(names[annotation["category_id"]], []).append(annotation)
+        return grouped
+
+    def test_accepted_verdicts_become_mounds(self, tmp_path: Path) -> None:
+        schema = LabelSchema.load("annotation/cvat/labels.json")
+        returned = self.reviewed([CONFIRMED, REJECTED, CORRECTED, "unreviewed"])
+        grouped = self.by_category(to_coco(returned, reference(tmp_path), schema))
+        assert {a["attributes"][REVIEW_STATUS] for a in grouped["mound"]} == {
             CONFIRMED,
             CORRECTED,
         }
+
+    def test_a_rejection_survives_as_an_untyped_hard_negative(self, tmp_path: Path) -> None:
+        """The data this path used to drop on the floor.
+
+        A rejected proposal is a symbol the detector fired on and a person said
+        was not a mound, which is the most useful negative the project can get.
+        Before v0.6 it contributed to the precision figure and then vanished.
+        """
+        schema = LabelSchema.load("annotation/cvat/labels.json")
+        returned = self.reviewed([CONFIRMED, REJECTED, CORRECTED, "unreviewed"])
+        grouped = self.by_category(to_coco(returned, reference(tmp_path), schema))
+        assert len(grouped["hard_negative_symbol"]) == 1
+        attributes = grouped["hard_negative_symbol"][0]["attributes"]
+        assert attributes[REVIEW_STATUS] == REJECTED
+        # Not "other": that is a real category and conflating the two would make
+        # a genuinely-other negative indistinguishable from an untyped one.
+        assert attributes[NEGATIVE_TYPE] == UNTYPED_NEGATIVE
+
+    def test_provenance_comes_from_the_verdict(self, tmp_path: Path) -> None:
+        """export_gis stamps every proposal accepted before anyone accepted it."""
+        schema = LabelSchema.load("annotation/cvat/labels.json")
+        returned = self.reviewed([CONFIRMED, REJECTED, CORRECTED, ADDED])
+        for feature in returned.features:
+            feature.properties[PROVENANCE] = "model_proposal_accepted"
+        document = to_coco(returned, reference(tmp_path), schema)
+        got = {
+            a["attributes"][REVIEW_STATUS]: a["attributes"][PROVENANCE]
+            for a in document.annotations
+        }
+        assert got == {
+            CONFIRMED: "model_proposal_accepted",
+            CORRECTED: "model_proposal_corrected",
+            ADDED: "human_added",
+            REJECTED: "model_proposal_rejected",
+        }
+
+    def test_every_provenance_used_is_in_the_schema(self) -> None:
+        schema = LabelSchema.load("annotation/cvat/labels.json")
+        allowed = set(schema.attribute("hard_negative_symbol", PROVENANCE)["values"])
+        assert set(PROVENANCE_BY_VERDICT.values()) <= allowed
+        assert UNTYPED_NEGATIVE in schema.attribute("hard_negative_symbol", NEGATIVE_TYPE)["values"]
+
+    def test_negatives_can_be_switched_off(self, tmp_path: Path) -> None:
+        """The pre-v0.6 behaviour stays reachable, for reproducing old output."""
+        schema = LabelSchema.load("annotation/cvat/labels.json")
+        returned = self.reviewed([CONFIRMED, REJECTED, CORRECTED, "unreviewed"])
+        document = to_coco(returned, reference(tmp_path), schema, negatives=())
+        assert "hard_negative_symbol" not in self.by_category(document)
+
+    def test_an_unreviewed_feature_becomes_neither(self, tmp_path: Path) -> None:
+        schema = LabelSchema.load("annotation/cvat/labels.json")
+        returned = self.reviewed(["unreviewed"] * 4)
+        assert to_coco(returned, reference(tmp_path), schema).annotations == []
+
+    def test_annotation_ids_stay_unique_across_categories(self, tmp_path: Path) -> None:
+        """Merging two documents is where ids would collide if it were naive."""
+        schema = LabelSchema.load("annotation/cvat/labels.json")
+        returned = self.reviewed([CONFIRMED, REJECTED, REJECTED, CORRECTED])
+        annotations = to_coco(returned, reference(tmp_path), schema).annotations
+        ids = [a["id"] for a in annotations]
+        assert len(ids) == len(set(ids)) == 4
 
     def test_annotations_land_in_the_right_clip(self, tmp_path: Path) -> None:
         schema = LabelSchema.load("annotation/cvat/labels.json")

@@ -6,9 +6,11 @@ the delivery work done after `RESULTS.md` was written.
 
 **One-line status.** Every model-side target is met and nothing further can be
 learned from three annotated sheets. The corpus is swept, the schema is fixed,
-the splits are permanent, and 57 sheets are packaged for the team. The project
-is waiting on one thing, and it is human: **nobody has annotated the blind
-test set, so there is still no test result.**
+the splits are permanent, 57 sheets are packaged, and **the team has started
+reviewing them**. The return path now keeps rejections as well as confirmations,
+so the review will produce training data and not only a precision figure. The
+project is still waiting on one thing, and it is human: **nobody has annotated
+the blind test set, so there is still no test result.**
 
 ---
 
@@ -82,6 +84,57 @@ still round-trips through `ingest_review`.
 **A master's thesis draft was written** from the repository's experiment record,
 at `docs/thesis/THESIS_DRAFT_{EN,BG}.md`. English is the source of truth.
 
+**Rejections stopped being thrown away.** Until 26 September
+`ingest_review.to_coco` kept only `confirmed`, `corrected` and `added`. A
+rejected proposal contributed to the precision figure in `review_report.json`
+and then became no annotation of any class — confirmed on a simulated review
+where 10 rejections produced 54 `mound` annotations and an empty
+`hard_negative_symbol` category. That discarded the most useful negatives the
+project can obtain: symbols this detector actually fired on, as opposed to the
+530 picked out by hand before any model existed.
+
+Rejections now come back as `hard_negative_symbol`. The two classes share all 15
+of `mound`'s attributes — `negative_type` is the only difference — so everything
+a reviewer filled in transfers and only that one field has to be supplied.
+
+Two schema values were needed, and the schema is now **v0.0.4**. Both additions
+are additive: no existing annotation changes, no default changes, and the v0.0.3
+export was checked to still validate against it.
+
+| added | why |
+|---|---|
+| `negative_type = unreviewed` | A rejection says "not a mound"; it does not say which kind of symbol it is, and the reviewer's form never asked. `other` is a **real** category carrying 17 annotations, so defaulting to it would make those indistinguishable from symbols nobody has typed. Same reasoning that made `water_line_crossing` a four-value select rather than two booleans, and the value doubles as the work queue. |
+| `annotation_provenance = model_proposal_rejected` | `export_gis` stamps every proposal `model_proposal_accepted` at delivery, before anyone has accepted anything, which is a contradiction on a feature that comes back rejected. Provenance is now derived from the verdict rather than trusted from the returned file. |
+
+**No export migration was made, and none is needed.** The latest annotation
+export is still `annotation/cvat/v0.0.3` while the schema of record reads
+v0.0.4. That is a legitimate state rather than drift: the new values are only
+*allowed* values, nothing existing uses them, and the 542 negatives keep the
+real types they already have. The first export that will carry them is the one
+cut from the returned reviews.
+
+**The delivered GeoPackages were deliberately not changed.** Reviewers hold
+downloaded copies and are editing them; adding a `negative_type` field would
+mean re-downloading and losing work. They do not need it — they are judging "is
+this a mound", not classifying non-mounds — and the typing is cheaper to do
+later in CVAT, where the field already exists on the class and an annotator is
+looking at the symbol anyway. This is why the fix was possible *after* reviewing
+had started: it lives entirely on the return path and applies retroactively to
+every file the team sends back.
+
+Verified on the same simulated review that exposed the loss:
+
+```
+verdicts: {'confirmed': 9, 'corrected': 45, 'rejected': 10}
+precision 0.844, recall floor 1.0
+wrote …: {'mound': 54, 'hard_negative_symbol': 10}
+```
+
+with every negative carrying `negative_type=unreviewed`,
+`annotation_provenance=model_proposal_rejected` and the reviewer's other 15
+attributes intact. `to_coco(..., negatives=())` restores the old behaviour, so
+output from before this change stays reproducible.
+
 ---
 
 ## Verified state of the gate
@@ -103,8 +156,62 @@ RGBA PNGs plus `clips.json` per sheet). The rasters were moved rather than
 deleted because the clips carry no CRS, so without them a test-set detection
 could not be put on a map.
 
-**Nothing has come back from the team yet.** `ASSIGNMENTS.csv` has no claimed
-rows and `returned/` is empty.
+**Reviewing is under way and nothing has come back yet.** The team started on
+the Drive copy, so progress is not visible from this repository: the local
+`ASSIGNMENTS.csv` and `returned/` are the copies that were uploaded, and they
+will stay untouched. The Google Sheet is the live one.
+
+---
+
+## Picking this up when the reviews arrive
+
+Per sheet, once a reviewed `.gpkg` lands in `returned/`:
+
+```bash
+source ~/venvs/ai_archaeo_topia/bin/activate
+LAKE=/mnt/c/Users/lubom/ai_archaeo_topia/data_lake
+B="$LAKE/cleaned/gis/v0_7_review_bundle"
+SHEET=K-35-21-G-a
+
+python -m archeo_topia.formats.ingest_review \
+  --returned "$B/returned/$SHEET.gpkg" \
+  --original "$B/sheets/$SHEET.gpkg" \
+  --clips-dir "$LAKE/cleaned/map_clips/dataset_03/$SHEET" \
+  --output "artifacts/review/v0_7/$SHEET"
+```
+
+It writes `review_report.json` and `instances_default.json`, and logs the
+verdict counts, precision, recall floor and the per-category annotation counts.
+
+**Read `problems` in the report before anything else.** It is empty when the
+file is sound. A non-empty list means a changed CRS, a duplicated or edited
+`mound_id`, a feature moved off the sheet, one left `unreviewed`, or — the one
+`review_status` exists to catch — a proposal deleted rather than marked
+rejected. None of those should be worked around; they need the reviewer.
+
+Then, in order:
+
+1. **Scope the numbers correctly when writing them up.** This is field
+   verification by domain experts on model-proposed candidates. It measures
+   **precision** well, because every proposal gets a verdict. It measures
+   **recall only as a floor**, over what reviewers independently noticed, which
+   is not an exhaustive search. It is **not** the frozen blind test and cannot
+   substitute for it. `review_report.json` carries that sentence in its `scope`
+   field so it travels with the numbers.
+2. **Check `K-35-39-A-g` separately if it comes back.** It is a working-pool
+   sheet that the parent grouping puts in `test`, because it shares parent
+   `K-35-39` with two frozen sheets. Its review is usable in the field and must
+   **not** enter training. Every feature carries `split` for this reason.
+3. **Import the COCO files into CVAT** to merge the verdicts beside the existing
+   annotations, and cut a new annotation export version from the result.
+   `annotation/cvat/labels.json` (v0.0.4) is the label set to import.
+4. **Type the negatives, optionally.** Every returned rejection arrives as
+   `negative_type=unreviewed`, which is the work queue: filtering on it in CVAT
+   gives exactly the symbols nobody has classified. Worth doing only if error
+   analysis *by negative type* is wanted — the detector is single-class, so
+   training treats every negative as background regardless of type.
+5. **Then retrain**, and only after the blind set has been annotated, so the
+   frozen sheets are touched once rather than twice.
 
 ---
 
@@ -118,26 +225,22 @@ Ranked by what blocks what.
    number this project has produced — v0.1 through the sweep above — is
    development evidence, and no amount of further engineering changes that.
    Nothing else on this list is worth as much.
-2. **Get the review bundle in front of the team.** Decide first whether they
-   already hold the supplier-georeferenced sheets: the GeoPackages carry absolute
-   EPSG:25835 coordinates, so if they do, the 16 MB bundle is sufficient on its
-   own. If they do not, the rasters are needed — 2.5 GB as delivered, or about
-   290 MB as JPEG-compressed COGs with overviews (measured: 27 MB → 5.1 MB on one
-   sheet). One file per sheet is what makes concurrent review safe; a GeoPackage
-   is a single SQLite file and two people editing one copy on shared storage lose
-   work silently.
-3. **Decide what a rejection is worth before the reviews arrive** — see *Known
-   gaps* below. Re-collecting a `negative_type` after the fact means a second
-   pass over the same symbols.
-4. **Retrain on the expanded corpus**, after the blind set is annotated, so the
+2. **Ingest the reviews as they come back** — the procedure is above. Done:
+   getting the bundle to the team, and deciding what a rejection is worth.
+   If any reviewer turns out not to hold the supplier-georeferenced sheets, they
+   need the rasters too: the GeoPackages carry absolute EPSG:25835 coordinates so
+   any georeferenced copy of the same sheet lines up, but a plain scan has nothing
+   to align to. That is 2.5 GB as delivered, or about 290 MB as JPEG-compressed
+   COGs with overviews (measured: 27 MB → 5.1 MB on one sheet).
+3. **Retrain on the expanded corpus**, after the blind set is annotated, so the
    frozen sheets are touched once rather than twice.
-5. **A second cartographic series.** Sixty-odd sheets of one Bulgarian 1:25k
+4. **A second cartographic series.** Sixty-odd sheets of one Bulgarian 1:25k
    series cannot retire the cross-cartographic caveat; only a different series
    can. Unchanged since v0.4.
-6. **Attribute extraction**, whose labels already exist on all 714 annotations.
+5. **Attribute extraction**, whose labels already exist on all 714 annotations.
    With 180 positives the frequent attributes are learnable and the rare ones —
    `crossed_by_powerline` at 4 instances — are not.
-7. **A segmentation-quality gate.** Two candidate signals identified, neither
+6. **A segmentation-quality gate.** Two candidate signals identified, neither
    validated: SAM's discarded `iou_predictions` head, which must be validated
    before it is trusted because it was never in the loss while the decoder around
    it moved, and mask stability under small prompt perturbations.
@@ -152,19 +255,20 @@ that they could address.
 
 ## Known gaps
 
-**Rejections are counted and then discarded.** `ingest_review.to_coco` keeps
-`confirmed`, `corrected` and `added`. A rejected proposal contributes to the
-precision figure in `review_report.json` and becomes no annotation of any class —
-verified on a simulated review where 10 rejections produced 54 `mound`
-annotations and an empty `hard_negative_symbol` category. Those rejections are
-the best negatives available, being symbols this detector actually fired on
-rather than the 530 hand-picked before any model existed. `to_coco` already takes
-a `keep` argument, so routing them is small.
+**The current batch's rejections will arrive untyped.** This is a consequence of
+the decision above, not an oversight: `negative_type` is absent from the
+reviewers' form, so every rejection comes back `unreviewed` on that field. It
+costs nothing for training, because the detector is single-class and negatives
+are taught as background regardless of type. It costs the ability to report error
+*by* type — "we reject decorative symbols reliably and confuse trig points 40% of
+the time" — until someone types them in CVAT. Add `negative_type` to the form for
+the **next** batch if that reporting matters; adding it now would make the team
+re-download.
 
-**The GIS form has no `negative_type`.** It is generated from the `mound` label
-only, so even if rejections were kept they would arrive untyped — and reporting
-error *by negative type* is the whole point of the typed negatives. Also small,
-in `styles.py`, but it has to happen before reviewing starts.
+**No real reviewed file has been through the return path.** Everything above was
+verified against simulated edits made through GDAL. The first genuine return is
+also the first test of `ingest_review` against a file a person actually touched,
+so read its `problems` list carefully rather than trusting the counts.
 
 **`configs/splits/v0_6_splits.json` is named v0_6 and its `version` field now
 reads `v0.7`.** Renaming means touching `DEFAULT_SPLITS` and several documents.
@@ -175,7 +279,7 @@ better than a path change nothing is ready for.
 currently it.
 
 **Unchanged debt from `RESULTS.md`:** three environment-coupled
-`sam2_backend` test failures (698 pass, 3 fail, 1 skip as of today);
+`sam2_backend` test failures (704 pass, 3 fail, 1 skip as of today);
 `mapsam_det_v1/metadata/windows.jsonl` stale against its source in one
 attribute, pre-dating v0.6 and depended on by no figure; `src/georeference/`
 orphaned, with its 30.5% pass rate not currently reproducible.
@@ -192,7 +296,7 @@ orphaned, with its 30.5% pass rate not currently reproducible.
 | corpus measurements before any model ran | `INPUT_INVENTORY.md` |
 | the synthesis across v0.4–v0.5 | `../REPORT_2026-09.md` |
 | target architecture | `../../architecture/TARGET_PIPELINE.md` |
-| schema of record | `annotation/cvat/labels.json` (v0.0.3) |
+| schema of record | `annotation/cvat/labels.json` (**v0.0.4**), CVAT array in `labels_cvat_raw.json` |
 | permanent splits | `configs/splits/v0_6_splits.json` (46/13/5 over 64) |
 | review bundle | `data_lake/cleaned/gis/v0_7_review_bundle/` |
 | frozen blind test set | `data_lake/raw/mound_test_20260915/_frozen/` and `data_lake/cleaned/map_clips/dataset_02/` |
