@@ -176,8 +176,8 @@ The corpus grows from 66.4 Mpx to 1384 Mpx, a **20-fold expansion**.
 ## Step 2 — Annotate the blind set
 
 **Four sheets are already frozen**, at
-`data_lake/cleaned/map_clips/dataset_02/`, each as four RGBA PNG clips in the
-`<sheet>/<sheet>_N.png` convention:
+`data_lake/cleaned/map_clips/_frozen/` (named `dataset_02` until 2026-09-28),
+each as four RGBA PNG clips in the `<sheet>/<sheet>_N.png` convention:
 
 | sheet | source set | clips | note |
 |---|---|---|---|

@@ -141,9 +141,10 @@ output from before this change stays reproducible.
 
 The blind test set is intact, checked rather than assumed:
 
-- No file under `data_lake/cleaned/map_clips/dataset_02/` or
+- No file under `data_lake/cleaned/map_clips/_frozen/` or
   `data_lake/raw/mound_test_20260915/_frozen/` has been modified since it was
-  created on 15 September.
+  created on 15 September. The clips folder was renamed from `dataset_02` on
+  2026-09-28, with its files untouched.
 - No artifact anywhere under `artifacts/` names `K-35-22-A-v`, `K-35-39-G-v`,
   `K-35-39-V-g` or `L-35-139-V-v`. No model has seen them.
 - `annotation/cvat/` still holds exactly `v0.0.1`, `v0.0.2`, `v0.0.3`. No
@@ -151,7 +152,7 @@ The blind test set is intact, checked rather than assumed:
 
 The frozen data lives in two places, which is easy to miss: the parent
 GeoTIFFs at `data_lake/raw/mound_test_20260915/_frozen/` (165 MB, 4 sheets) and
-the clips to annotate at `data_lake/cleaned/map_clips/dataset_02/` (120 MB, four
+the clips to annotate at `data_lake/cleaned/map_clips/_frozen/` (120 MB, four
 RGBA PNGs plus `clips.json` per sheet). The rasters were moved rather than
 deleted because the clips carry no CRS, so without them a test-set detection
 could not be put on a map.
@@ -299,7 +300,7 @@ orphaned, with its 30.5% pass rate not currently reproducible.
 | schema of record | `annotation/cvat/labels.json` (**v0.0.4**), CVAT array in `labels_cvat_raw.json` |
 | permanent splits | `configs/splits/v0_6_splits.json` (46/13/5 over 64) |
 | review bundle | `data_lake/cleaned/gis/v0_7_review_bundle/` |
-| frozen blind test set | `data_lake/raw/mound_test_20260915/_frozen/` and `data_lake/cleaned/map_clips/dataset_02/` |
+| frozen blind test set | `data_lake/raw/mound_test_20260915/_frozen/` and `data_lake/cleaned/map_clips/_frozen/` |
 | thesis draft | `../../thesis/THESIS_DRAFT_EN.md` |
 
 Environment: torch 2.14.0+cu130, ultralytics 8.4.150, segment-anything 1.0,

@@ -9,9 +9,10 @@ named `K-35-8-G-a_*.png`. The **files** are correct; the folder name is a typo
 `task_K34-8-G-a`. It is **deliberately not being fixed**: every experiment from
 v0.1 onward, the annotation exports and the CVAT task all key off the correct
 file names, so nothing is broken, and renaming now would desynchronise the CVAT
-task from the data lake for no benefit. Two folders in `dataset_02` carried the
-same class of error and *were* corrected before any experiment used them
-(`K-35-22-G-v` → `K-35-39-G-v`, `K-35-A-v` → `K-35-22-A-v`), confirmed by
+task from the data lake for no benefit. Two folders in `dataset_02` (since
+renamed `_frozen`) carried the same class of error and *were* corrected before
+any experiment used them (`K-35-22-G-v` → `K-35-39-G-v`, `K-35-A-v` →
+`K-35-22-A-v`), confirmed by
 matching each folder's 2×2 clip reconstruction against the parent raster's
 dimensions. **When in doubt, trust the file name.**
 
