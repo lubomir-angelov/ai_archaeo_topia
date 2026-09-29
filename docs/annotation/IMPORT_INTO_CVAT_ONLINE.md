@@ -1,7 +1,7 @@
 # Importing into CVAT online
 
 Files to upload (seen from Windows):
-- Labels: \\wsl$\Ubuntu\home\ubuntu\repos\ai_archaeo_topia\annotation\cvat\labels_cvat_raw.json. This is v0.0.4, with the labels mound (polygon), hard_negative_symbol (rectangle) and uncertain_ignore (rectangle).
+- Labels: \\wsl$\Ubuntu\home\ubuntu\repos\ai_archaeo_topia\annotation\cvat\labels_cvat_raw.json. This is v0.0.4, with the labels mound (any: polygon or mask), hard_negative_symbol (rectangle) and uncertain_ignore (rectangle).
 - Images: C:\Users\lubom\ai_archaeo_topia\data_lake\cleaned\map_clips\_frozen\<sheet>\<sheet>_1..4.png. That's 16 RGBA PNGs of about 2.4k×2.2k pixels each, which CVAT accepts as they are.
 
 ## 1. Create the project and import the labels

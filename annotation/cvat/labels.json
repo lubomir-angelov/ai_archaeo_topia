@@ -1,6 +1,6 @@
 {
   "schema_version": "v0.0.4",
-  "note": "The label schema for this project had no machine-readable form until v0.6: it existed only implicitly inside the CVAT COCO exports, and the attribute list written into docs/annotation/PROTOCOL_EN.md had drifted away from it. First generated from annotation/cvat/v0.0.3/instances_default.json; hand-maintained and the source of truth from here on. Import it into CVAT as the project label set. v0.0.4 is additive: it adds negative_type=unreviewed, for a negative nobody has typed yet, and annotation_provenance=model_proposal_rejected, for a proposal a reviewer turned down. No existing annotation changes and no default changes, so v0.0.3 exports stay valid against it. annotation/archaeology_symbols_v1.yaml is NOT this schema -- it belongs to the unused SAM2 proposal path and nothing in MapSAM reads it.",
+  "note": "The label schema for this project had no machine-readable form until v0.6: it existed only implicitly inside the CVAT COCO exports, and the attribute list written into docs/annotation/PROTOCOL_EN.md had drifted away from it. First generated from annotation/cvat/v0.0.3/instances_default.json; hand-maintained and the source of truth from here on. Import it into CVAT as the project label set. v0.0.4 is additive: it adds negative_type=unreviewed, for a negative nobody has typed yet, and annotation_provenance=model_proposal_rejected, for a proposal a reviewer turned down. No existing annotation changes and no default changes, so v0.0.3 exports stay valid against it. v0.0.4 also declares mound as type any so CVAT allows both polygon and mask (brush) drawing, matching the v0.0.3 exports which are mostly masks. annotation/archaeology_symbols_v1.yaml is NOT this schema -- it belongs to the unused SAM2 proposal path and nothing in MapSAM reads it.",
   "builtin_attributes_excluded": [
     "occluded",
     "rotation"
@@ -8,7 +8,7 @@
   "labels": [
     {
       "name": "mound",
-      "type": "polygon",
+      "type": "any",
       "color": "#33ddff",
       "attributes": [
         {

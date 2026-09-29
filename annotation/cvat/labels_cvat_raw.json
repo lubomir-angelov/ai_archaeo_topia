@@ -2,7 +2,7 @@
   {
     "name": "mound",
     "color": "#33ddff",
-    "type": "polygon",
+    "type": "any",
     "attributes": [
       {
         "name": "affected_by_colored_pencil",
