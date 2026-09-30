@@ -705,6 +705,23 @@ reject
 request_discussion
 ```
 
+### Recording review outcomes in CVAT
+
+`review_status` (values `unreviewed`, `confirmed`, `rejected`, `corrected`, `added`; default `unreviewed`) records what a reviewer concluded. `annotation_provenance` records who drew the shape. `review_status` was introduced for reviewing detector proposals and applies equally to reviewing a colleague's work.
+
+| Reviewer action | What the reviewer does | `review_status` |
+|---|---|---|
+| `accept` | leave the object as drawn | `confirmed` |
+| `correct` | fix the outline or an attribute | `corrected` |
+| (reviewer draws a missed object) | draw the new object | `added` |
+| `reject` | set `rejected` **and** change the label (see below) | `rejected` |
+| `mark_as_uncertain` | relabel as `uncertain_ignore` with a `reason`; mandatory second review per the list above | `corrected` |
+| `request_discussion` | raise it with the annotator; keep this brief | leave `unreviewed` |
+
+On human-drawn objects `annotation_provenance` stays `human_added`, including for objects the reviewer adds. The `model_proposal_*` values never apply on the blind test set, which has no model output.
+
+**Relabel on reject.** Change the label to `hard_negative_symbol` with a `negative_type` if the object is a genuine look-alike symbol, otherwise to `uncertain_ignore`. Only the GIS review ingest (`src/archeo_topia/formats/ingest_review.py`) acts on `review_status`, converting rejections to `hard_negative_symbol`. A CVAT COCO export does not, and nothing downstream filters on the attribute, so a `mound` left marked `rejected` would still count as a ground-truth mound. Keep `review_status=rejected` on the relabelled object so the disagreement stays on record; do not delete it.
+
 Reviewer comments should be kept short and specific.
 
 ---

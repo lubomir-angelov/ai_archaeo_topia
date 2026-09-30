@@ -670,7 +670,7 @@ runs reported.
 ### 4.3 Annotation protocol and the label schema (≈3 pp)
 
 Annotation is in CVAT, by archaeologists, against a written protocol maintained
-in English and Bulgarian (`docs/annotation/PROTOCOL_{EN,BG}.md`). Three classes:
+in English (`docs/annotation/PROTOCOL_EN.md`). Three classes:
 
 | class | v0.0.1 | v0.0.3 | role |
 |---|---:|---:|---|
