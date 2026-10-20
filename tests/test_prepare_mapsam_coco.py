@@ -220,13 +220,23 @@ class TestDecodeUncompressedCocoRle:
             decode_uncompressed_coco_rle(seg, 10, 10)
 
     def test_pixel_count_mismatch_raises(self) -> None:
-        seg = {"size": [10, 10], "counts": [50, 50]}
+        seg = {"size": [10, 10], "counts": [50, 40]}
         with pytest.raises(ValueError, match="sum"):
+            decode_uncompressed_coco_rle(seg, 10, 10)
+
+    def test_size_disagreeing_with_the_image_raises(self) -> None:
+        """A mask declaring a different size than its image is a data bug.
+
+        One of the two decoders this now delegates to used to paste such a mask
+        into the top-left corner, which hid the problem.
+        """
+        seg = {"size": [10, 10], "counts": [50, 50]}
+        with pytest.raises(ValueError, match="does not match the image"):
             decode_uncompressed_coco_rle(seg, 20, 20)
 
     def test_non_list_counts_raises(self) -> None:
         seg = {"size": [10, 10], "counts": "compressed_string"}
-        with pytest.raises(ValueError, match="Compressed"):
+        with pytest.raises(ValueError, match="(?i)compressed"):
             decode_uncompressed_coco_rle(seg, 10, 10)
 
     def test_bbox_regression(self) -> None:
