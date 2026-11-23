@@ -1,0 +1,220 @@
+{
+  "entries": [
+    {
+      "role": "ground_truth",
+      "root": "repo",
+      "path": "annotation/cvat/frozen_test/v0.0.1/instances_Test.json",
+      "sha256": "0d13665231e45c24bf6b3e78e4c057c9b7842bcb7d2f5c219766dd1cd829b259"
+    },
+    {
+      "role": "clips_json",
+      "sheet": "K-35-22-A-v",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-22-A-v/clips.json",
+      "sha256": "9191f598f1fdff8f5e702fed4d9227a24bceb23564b8f26d074743ed19360f60"
+    },
+    {
+      "role": "clips_json",
+      "sheet": "K-35-39-G-v",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-G-v/clips.json",
+      "sha256": "d5f7d98b3ec182891fe18e6ff2ff7b2050ce911d5e47c300dfd4f2aef2256aea"
+    },
+    {
+      "role": "clips_json",
+      "sheet": "K-35-39-V-g",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-V-g/clips.json",
+      "sha256": "20af76140c08b0231a9bf0e8f6f2223bba5ae5374fcea7745524eecfad72a3ae"
+    },
+    {
+      "role": "clips_json",
+      "sheet": "L-35-139-V-v",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/L-35-139-V-v/clips.json",
+      "sha256": "736c4046cb334b8a932f851be2426b5412274359070a49ab7f144fdf0b885a85"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-22-A-v",
+      "file": "K-35-22-A-v_1.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-22-A-v/K-35-22-A-v_1.png",
+      "sha256": "0fce4cdbe00db36ab9e67c51f7c6f8237f41f644b3cf2f586615e76272288853"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-22-A-v",
+      "file": "K-35-22-A-v_2.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-22-A-v/K-35-22-A-v_2.png",
+      "sha256": "857caee083f21aa4a3646f0c37914ed14b8d1823badab07c2b1283490821f5ba"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-22-A-v",
+      "file": "K-35-22-A-v_3.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-22-A-v/K-35-22-A-v_3.png",
+      "sha256": "5790500da3e711123ca33e40b1ed53ffe3f8789a17dfe87f77d93935fd136849"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-22-A-v",
+      "file": "K-35-22-A-v_4.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-22-A-v/K-35-22-A-v_4.png",
+      "sha256": "8f36d0be5a268882b8b80562d47b52b08df315c183b395ce3f77adc6931b6cee"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-39-G-v",
+      "file": "K-35-39-G-v_1.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-G-v/K-35-39-G-v_1.png",
+      "sha256": "b1aaff79f709b2310ad89853f44f470ca901ea928230b338ced409046e7fee45"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-39-G-v",
+      "file": "K-35-39-G-v_2.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-G-v/K-35-39-G-v_2.png",
+      "sha256": "82269c8a96fa83f19b5a44e0792e97b8d4e900cceecca382d9ccdfca75a90e7b"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-39-G-v",
+      "file": "K-35-39-G-v_3.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-G-v/K-35-39-G-v_3.png",
+      "sha256": "e9cee8b6f66f3acbf54c3428979797558e21e86c875244bd5ede5b96f2ee145d"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-39-G-v",
+      "file": "K-35-39-G-v_4.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-G-v/K-35-39-G-v_4.png",
+      "sha256": "472e758386fd1f0e9048e21712bc4a13a96735663250981cace607827e0b70b5"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-39-V-g",
+      "file": "K-35-39-V-g_1.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-V-g/K-35-39-V-g_1.png",
+      "sha256": "a207b2c751401b62f9ba6c6247762e750b5bb311df335c286811e6b6b3753ac5"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-39-V-g",
+      "file": "K-35-39-V-g_2.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-V-g/K-35-39-V-g_2.png",
+      "sha256": "eca6c687c4266b2600ef423efef628fb5f5ecbd96fa7b13009bd0b6c4a335b63"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-39-V-g",
+      "file": "K-35-39-V-g_3.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-V-g/K-35-39-V-g_3.png",
+      "sha256": "f0cc3edc3349fe932bc4a76e1debedc227bc4db834d55450bea38cd9e6ddb054"
+    },
+    {
+      "role": "clip",
+      "sheet": "K-35-39-V-g",
+      "file": "K-35-39-V-g_4.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/K-35-39-V-g/K-35-39-V-g_4.png",
+      "sha256": "798c1f7a7e0577dfcb7ca7c5ff6718d42d26171249ccf7ffdd04e36b25f4d57a"
+    },
+    {
+      "role": "clip",
+      "sheet": "L-35-139-V-v",
+      "file": "L-35-139-V-v_1.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/L-35-139-V-v/L-35-139-V-v_1.png",
+      "sha256": "222433afc909f580ec27332c2c9a13d9b8d194e9974d1664b74946b4795342c7"
+    },
+    {
+      "role": "clip",
+      "sheet": "L-35-139-V-v",
+      "file": "L-35-139-V-v_2.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/L-35-139-V-v/L-35-139-V-v_2.png",
+      "sha256": "2cb5005f9695b2c92223832940fc8c07ca5962b36e632fb5f483b8e9e84cbc5c"
+    },
+    {
+      "role": "clip",
+      "sheet": "L-35-139-V-v",
+      "file": "L-35-139-V-v_3.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/L-35-139-V-v/L-35-139-V-v_3.png",
+      "sha256": "9c81ec7e4c7cf004014b75f3afdc8a71e2af28accdabdbd6b4dc3a53dc93edac"
+    },
+    {
+      "role": "clip",
+      "sheet": "L-35-139-V-v",
+      "file": "L-35-139-V-v_4.png",
+      "root": "lake",
+      "path": "cleaned/map_clips/_frozen/L-35-139-V-v/L-35-139-V-v_4.png",
+      "sha256": "5a4e740da5382fcc7e5b08a79e89e469b9d7b2aea1092fb513a4fe9ca218eaea"
+    },
+    {
+      "role": "detector",
+      "fold": "foldA",
+      "root": "repo",
+      "path": "artifacts/detection/v0_5_yolo26s_gtfix/foldA/weights/last.pt",
+      "sha256": "060c74effc40e0d44fa2e9ce93982cfa0399c0feb7520b1b438ce64628d57b17"
+    },
+    {
+      "role": "detector",
+      "fold": "foldB",
+      "root": "repo",
+      "path": "artifacts/detection/v0_5_yolo26s_gtfix/foldB/weights/last.pt",
+      "sha256": "8b31a79ef18e1c6b585eb2699cd655ee012dc48fb689d68aad99d800e8e5fb5e"
+    },
+    {
+      "role": "detector",
+      "fold": "foldC",
+      "root": "repo",
+      "path": "artifacts/detection/v0_5_yolo26s_gtfix/foldC/weights/last.pt",
+      "sha256": "8a9e54aae0e5f8ff05b0408e5f38a179b7e1f6f05baa676904e57260e70c9ee1"
+    },
+    {
+      "role": "decoder",
+      "fold": "foldA",
+      "root": "repo",
+      "path": "artifacts/models/mapsam/v0_4r_loso512_foldA_pw20/checkpoints/final.pt",
+      "sha256": "c745db8b580405cc15b16d8be61b8c16c090c287fca8c6bd8350da1d9211d0ae"
+    },
+    {
+      "role": "decoder",
+      "fold": "foldB",
+      "root": "repo",
+      "path": "artifacts/models/mapsam/v0_4r_loso512_foldB_pw20/checkpoints/final.pt",
+      "sha256": "3c1a1d8b767ec9c920ca7d66b73c6c8f71e40f6fa3c0bd1cd9705ef6b73740fe"
+    },
+    {
+      "role": "decoder",
+      "fold": "foldC",
+      "root": "repo",
+      "path": "artifacts/models/mapsam/v0_4r_loso512_foldC_pw20/checkpoints/final.pt",
+      "sha256": "dad207c3084d0336d3bd3bf801f383028503b592e45d397ce11005455cc11850"
+    },
+    {
+      "role": "sam_base",
+      "root": "repo",
+      "path": "models/checkpoints/sam/sam_vit_b_01ec64.pth",
+      "sha256": "ec2df62732614e57411cdcf32a23ffdf28910380d03139ee0f4fcbe91eb8c912"
+    },
+    {
+      "role": "windows_build_report",
+      "root": "repo",
+      "path": "data/curated/datasets/mapsam_det_frozen_v001/metadata/build_report.json",
+      "sha256": "78e8245d7e4463796342761e67cb7e89916a26a061496e0c6522c58b16e74722"
+    }
+  ]
+}
