@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from pathlib import Path
@@ -11,13 +12,26 @@ import pytest
 from PIL import Image
 
 from archeo_topia.analysis.frozen_manifest import (
-    build_output_problems,
+    extend_manifest,
+    manifest_text,
     parse_source_hash,
     verify_manifest,
     write_manifest,
 )
-from archeo_topia.datasets.build_detection_windows import FOLDS, sha256_file
-from tests.frozen_fixtures import DATASET, SHEETS, hash_row, make_world
+from archeo_topia.datasets.build_detection_windows import (
+    FOLDS,
+    build_output_problems,
+    sha256_file,
+)
+from tests.frozen_fixtures import (
+    CHOSEN,
+    DATASET,
+    SHEETS,
+    World,
+    hash_row,
+    make_world,
+    write_selection,
+)
 
 
 def test_parse_source_hash_reads_the_one_row(tmp_path: Path) -> None:
@@ -211,3 +225,158 @@ def test_a_missing_key_is_reported_as_missing_not_as_an_empty_value(tmp_path: Pa
 
     assert "entry 0: missing keys ['sha256']" in str(raised.value)
     assert "is not a digest" not in str(raised.value)
+
+
+# ---------------------------------------------------------------------------
+# extend: the refit detector joins the manifest, and the base stays provable
+# ---------------------------------------------------------------------------
+
+
+def _extend(world: World, selection: Path) -> dict[str, Any]:
+    return extend_manifest(
+        world.output, world.sources.lake_root, world.sources.repo_root, selection
+    )
+
+
+@pytest.fixture
+def written(tmp_path: Path) -> tuple[World, dict[str, Any]]:
+    world = make_world(tmp_path)
+    return world, write_manifest(world.sources, world.output)
+
+
+def test_extend_appends_two_entries_and_pins_the_base_by_hash(
+    written: tuple[World, dict[str, Any]],
+) -> None:
+    world, base = written
+    base_text = world.output.read_text(encoding="utf-8")
+    extended = _extend(world, write_selection(world))
+
+    assert extended["entries"][: len(base["entries"])] == base["entries"]
+    assert [e["role"] for e in extended["entries"][len(base["entries"]) :]] == [
+        "refit_detector",
+        "refit_selection",
+    ]
+    assert extended["entries"][-2]["checkpoint"] == "epoch100.pt"
+    assert extended["base"] == {
+        "entries": len(base["entries"]),
+        "sha256": hashlib.sha256(base_text.encode()).hexdigest(),
+    }
+    assert world.output.read_text(encoding="utf-8") == manifest_text(extended)
+    assert verify_manifest(world.output, world.sources.lake_root, world.sources.repo_root) == (
+        extended
+    )
+    assert not world.output.with_name("manifest.json.extending").exists()
+
+
+def test_a_base_entry_edited_after_the_extension_fails_the_base_proof(
+    written: tuple[World, dict[str, Any]],
+) -> None:
+    world, _ = written
+    extended = _extend(world, write_selection(world))
+    extended["entries"][0]["path"] = "annotation/frozen/other.json"
+    world.output.write_text(manifest_text(extended), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="do not hash to the recorded base sha256"):
+        verify_manifest(world.output, world.sources.lake_root, world.sources.repo_root)
+
+
+def test_a_manifest_is_extended_once(written: tuple[World, dict[str, Any]]) -> None:
+    world, _ = written
+    selection = write_selection(world)
+    _extend(world, selection)
+    after_first = world.output.read_bytes()
+
+    with pytest.raises(ValueError, match="already extended"):
+        _extend(world, selection)
+    assert world.output.read_bytes() == after_first
+
+
+def test_extend_refuses_a_non_canonical_base(written: tuple[World, dict[str, Any]]) -> None:
+    world, base = written
+    world.output.write_text(json.dumps(base, indent=4) + "\n", encoding="utf-8")
+    before = world.output.read_bytes()
+
+    with pytest.raises(ValueError, match="not in canonical form"):
+        _extend(world, write_selection(world))
+    assert world.output.read_bytes() == before
+
+
+def test_extend_refuses_a_selection_whose_hash_or_constants_differ(
+    written: tuple[World, dict[str, Any]],
+) -> None:
+    world, _ = written
+    before = world.output.read_bytes()
+    bad_hash = write_selection(
+        world, chosen={"file": "epoch100.pt", "path": CHOSEN.as_posix(), "sha256": "0" * 64}
+    )
+    with pytest.raises(ValueError, match="no longer hashes"):
+        _extend(world, bad_hash)
+
+    with pytest.raises(ValueError, match="imgsz 640"):
+        _extend(world, write_selection(world, imgsz=640))
+    assert world.output.read_bytes() == before
+    assert not world.output.with_name("manifest.json.extending").exists()
+
+
+def test_extend_refuses_a_selection_whose_chosen_is_not_what_the_rule_yields(
+    written: tuple[World, dict[str, Any]],
+) -> None:
+    world, _ = written
+    before = world.output.read_bytes()
+    repo = world.sources.repo_root
+    other = write_selection(world)
+    document = json.loads((repo / other).read_text(encoding="utf-8"))
+    row = next(r for r in document["candidates"] if r["file"] == "last.pt")
+    document["chosen"] = {key: row[key] for key in ("file", "path", "sha256")}
+    (repo / other).write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="the rule chooses epoch100.pt, not last.pt"):
+        _extend(world, other)
+    assert world.output.read_bytes() == before
+    assert not world.output.with_name("manifest.json.extending").exists()
+
+
+def test_extend_stops_on_a_tampered_base_entry_and_leaves_the_file_alone(
+    written: tuple[World, dict[str, Any]],
+) -> None:
+    world, _ = written
+    selection = write_selection(world)
+    (world.sources.repo_root / "sam.pth").write_bytes(b"changed")
+    before = world.output.read_bytes()
+
+    with pytest.raises(ValueError, match="sam_base"):
+        _extend(world, selection)
+    assert world.output.read_bytes() == before
+    assert not world.output.with_name("manifest.json.extending").exists()
+
+
+def test_a_leftover_staging_file_stops_the_extension(
+    written: tuple[World, dict[str, Any]],
+) -> None:
+    world, _ = written
+    staged = world.output.with_name("manifest.json.extending")
+    staged.write_text("left over", encoding="utf-8")
+    before = world.output.read_bytes()
+
+    with pytest.raises(FileExistsError):
+        _extend(world, write_selection(world))
+    assert staged.read_text(encoding="utf-8") == "left over"
+    assert world.output.read_bytes() == before
+
+
+def test_a_refit_role_without_a_base_is_malformed(written: tuple[World, dict[str, Any]]) -> None:
+    world, base = written
+    base["entries"].append({**base["entries"][0], "role": "refit_detector"})
+    world.output.write_text(manifest_text(base), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="needs a base"):
+        verify_manifest(world.output, world.sources.lake_root, world.sources.repo_root)
+
+
+def test_verify_covers_the_refit_entries(written: tuple[World, dict[str, Any]]) -> None:
+    world, _ = written
+    _extend(world, write_selection(world))
+    (world.sources.repo_root / CHOSEN).write_bytes(b"swapped")
+
+    with pytest.raises(ValueError, match="refit_detector"):
+        verify_manifest(world.output, world.sources.lake_root, world.sources.repo_root)

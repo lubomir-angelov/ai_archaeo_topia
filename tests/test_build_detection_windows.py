@@ -12,18 +12,33 @@ import pytest
 from PIL import Image
 
 from archeo_topia.datasets.build_detection_windows import (
-    REPO_ROOT,
+    LabelSource,
+    RefitConfig,
     Window,
+    _human_added_share,
+    _overlaps,
     build,
     clip_box,
     crop_path,
+    find_image,
     listing_entry,
+    load_refit_config,
     plan_windows,
+    refit_candidates,
     sheet_of,
     to_yolo,
+    validate_export,
 )
-
-SCHEMA = REPO_ROOT / "annotation" / "cvat" / "labels.json"
+from archeo_topia.datasets.build_detection_windows import (
+    main as bdw_main,
+)
+from tests.refit_fixtures import (
+    COMMITTED_CONFIG,
+    SCHEMA,
+    TRAIN_VAL_SPLITS,
+    RefitWorld,
+    write_clips,
+)
 
 
 def test_sheet_of_keeps_hyphenated_sheet_id() -> None:
@@ -147,25 +162,6 @@ def _splits(
     return path
 
 
-def _clips(tmp_path: Path, by_sheet: dict[str, list[str]]) -> list[Path]:
-    """Write one clips.json per sheet."""
-    paths = []
-    for sheet, files in by_sheet.items():
-        path = tmp_path / f"{sheet}_clips.json"
-        path.write_text(
-            json.dumps(
-                {
-                    "sheet_id": sheet,
-                    "parent_size": [900, 700],
-                    "clips": [{"file": f, "offset_xy": [0, 0], "size": [900, 700]} for f in files],
-                }
-            ),
-            encoding="utf-8",
-        )
-        paths.append(path)
-    return paths
-
-
 def _build(
     tmp_path: Path,
     plan: str = "loso",
@@ -173,20 +169,21 @@ def _build(
     clips: list[Path] | None = None,
     splits: Path | None = None,
     name: str = "det",
-    **kwargs: Any,
+    refit_config: RefitConfig | None = None,
 ) -> dict[str, Any]:
     """Build a dataset under ``tmp_path / name``."""
+    coco = coco or _coco(tmp_path)
     return build(
-        coco or _coco(tmp_path),
-        tmp_path / "images",
+        [LabelSource(coco.parent.name, coco, "all")],
+        [tmp_path / "images"],
         tmp_path / name,
         window_size=512,
         stride=384,
         schema_path=SCHEMA,
         plan=plan,
         clips_json_paths=clips,
+        refit_config=refit_config,
         splits_file=splits or _splits(tmp_path),
-        **kwargs,
     )
 
 
@@ -195,7 +192,7 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
 
 
 def _test_clips(tmp_path: Path) -> list[Path]:
-    return _clips(tmp_path, {"S-1": ["S-1_1.png"], "S-2": ["S-2_1.png"]})
+    return write_clips(tmp_path, {"S-1": ["S-1_1.png"], "S-2": ["S-2_1.png"]})
 
 
 def test_build_writes_one_class_labels_and_shared_windows(tmp_path: Path) -> None:
@@ -375,7 +372,7 @@ def test_clip_completeness_violations_stop_before_anything_is_written(tmp_path: 
             tmp_path,
             plan="test",
             coco=coco,
-            clips=_clips(tmp_path, {"S-1": ["S-1_1.png", "S-1_9.png"], "S-3": []}),
+            clips=write_clips(tmp_path, {"S-1": ["S-1_1.png", "S-1_9.png"], "S-3": []}),
         )
     message = str(caught.value)
     assert "missing from the export: ['S-1_9.png']" in message
@@ -395,6 +392,14 @@ def test_report_records_inputs_listing_regions_and_verifiable_hashes(tmp_path: P
     assert report["inputs"]["splits_version"] == "vtest"
     assert "images_root" not in report["inputs"]
     assert "clips_json" not in report["inputs"]
+    assert "coco_json" not in report["inputs"]
+    (source,) = report["inputs"]["label_sources"]
+    assert source["name"] == tmp_path.name
+    assert source["mound_rule"] == "all"
+    assert (
+        source["sha256"] == hashlib.sha256((tmp_path / "instances.json").read_bytes()).hexdigest()
+    )
+    assert report["refit"] is None
     assert report["inputs"]["clips_json_sha256"] == {
         "S-1": hashlib.sha256(clips[0].read_bytes()).hexdigest(),
         "S-2": hashlib.sha256(clips[1].read_bytes()).hexdigest(),
@@ -449,3 +454,418 @@ def test_crop_path_and_listing_entry_name_the_same_crop() -> None:
         "ds/images/S-1_1_x00000_y00000.png"
     )
     assert listing_entry("S-1_1_x00000_y00000") == "./images/S-1_1_x00000_y00000.png"
+
+
+def _png(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (4, 4)).save(path)
+    return path
+
+
+def test_find_image_searches_every_root(tmp_path: Path) -> None:
+    """A clip is found in whichever root holds it, directly or one level down."""
+    first, second = tmp_path / "a", tmp_path / "b"
+    in_first = _png(first / "train" / "A_1.png")
+    in_second = _png(second / "S-9" / "S-9_1.png")
+
+    assert find_image([first, second], "A_1.png") == in_first
+    assert find_image([first, second], "S-9_1.png") == in_second
+
+
+def test_find_image_stops_when_the_clip_is_in_no_root(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="A_1.png not found"):
+        find_image([tmp_path / "a", tmp_path / "b"], "A_1.png")
+
+
+def test_find_image_stops_on_a_clip_in_two_places(tmp_path: Path) -> None:
+    """The same name in two roots, or directly and one level down, is ambiguous."""
+    _png(tmp_path / "a" / "A_1.png")
+    _png(tmp_path / "b" / "val" / "A_1.png")
+    with pytest.raises(ValueError, match="found 2 times"):
+        find_image([tmp_path / "a", tmp_path / "b"], "A_1.png")
+
+    _png(tmp_path / "a" / "val" / "B_1.png")
+    _png(tmp_path / "a" / "B_1.png")
+    with pytest.raises(ValueError, match="found 2 times"):
+        find_image([tmp_path / "a"], "B_1.png")
+
+
+# ---------------------------------------------------------------------------
+# The refit: configuration and the train_val plan
+# ---------------------------------------------------------------------------
+
+PROTOCOL_CANDIDATES = (
+    "epoch25.pt",
+    "epoch50.pt",
+    "epoch75.pt",
+    "epoch100.pt",
+    "epoch125.pt",
+    "last.pt",
+)
+
+
+def _config_document(**edits: Any) -> dict[str, Any]:
+    document = json.loads(COMMITTED_CONFIG.read_text(encoding="utf-8"))
+    document.update(edits)
+    return document
+
+
+def _write_config(tmp_path: Path, document: dict[str, Any]) -> Path:
+    path = tmp_path / "refit.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return path
+
+
+def test_the_committed_refit_config_loads_and_yields_the_protocols_six_candidates() -> None:
+    """The protocol's prose names six files; the derivation must agree (drift check)."""
+    config = load_refit_config(COMMITTED_CONFIG)
+
+    assert refit_candidates(config) == PROTOCOL_CANDIDATES
+    assert (config.window, config.stride, config.epochs, config.batch, config.seed) == (
+        512,
+        384,
+        150,
+        16,
+        42,
+    )
+    assert [(s.name, s.mound_rule) for s in config.label_sources] == [
+        ("v0.0.3", "all"),
+        ("v0.0.5", "reviewed"),
+    ]
+    assert all(s.coco_json.is_absolute() for s in config.label_sources)
+    assert config.sha256 == hashlib.sha256(COMMITTED_CONFIG.read_bytes()).hexdigest()
+
+
+def _without(key: str) -> dict[str, Any]:
+    document = _config_document()
+    del document[key]
+    return document
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    [
+        (_without("seed"), "missing \\['seed'\\]"),
+        (_config_document(extra=1), "unexpected \\['extra'\\]"),
+        (_config_document(window=True), "window must be a positive int"),
+        (_config_document(batch=0), "batch must be a positive int"),
+        (_config_document(epochs=150, save_period=40), "not a multiple of save_period"),
+        (_config_document(development_source="v0.0.5"), "development source must use"),
+        (_config_document(development_source="nope"), "names no source"),
+        (_config_document(label_sources=[]), "label_sources is empty"),
+        (
+            _config_document(
+                label_sources=[
+                    {"name": "a", "coco_json": "x.json", "mound_rule": "some"},
+                ],
+                development_source="a",
+            ),
+            "mound_rule 'some' is unknown",
+        ),
+        (
+            _config_document(
+                label_sources=[
+                    {"name": "a", "coco_json": "/abs/x.json", "mound_rule": "all"},
+                ],
+                development_source="a",
+            ),
+            "repository-relative",
+        ),
+    ],
+)
+def test_a_bad_refit_config_stops(tmp_path: Path, document: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        load_refit_config(_write_config(tmp_path, document))
+
+
+def _lines(path: Path) -> list[str]:
+    return path.read_text(encoding="utf-8").splitlines()
+
+
+def test_train_val_writes_one_listing_pair_and_one_yaml(tmp_path: Path) -> None:
+    world = RefitWorld(tmp_path)
+    report = world.build()
+    out = tmp_path / "refit"
+
+    assert sorted(p.name for p in out.glob("*.txt")) == ["train.txt", "val.txt"]
+    assert [p.name for p in out.glob("*.yaml")] == ["train_val.yaml"]
+    assert report["listing"]["plan"] == "train_val"
+    assert report["listing"]["folds"] is None
+    assert report["listing"]["listings"]["train"]["sheets"] == ["D-1", "T-1"]
+    assert report["listing"]["listings"]["val"]["sheets"] == ["V-1"]
+    assert "outputs_sha256" in report and "train.txt" in report["outputs_sha256"]
+    yaml = (out / "train_val.yaml").read_text(encoding="utf-8")
+    assert "train: train.txt" in yaml and "val: val.txt" in yaml
+    assert [s["name"] for s in report["inputs"]["label_sources"]] == ["v0.0.3", "v0.0.5"]
+    assert report["refit"]["config"]["name"] == "v0_6_refit"
+
+
+def test_train_val_excludes_unreviewed_and_absent_sheets_whole(tmp_path: Path) -> None:
+    report = RefitWorld(tmp_path).build()
+    refit = report["refit"]
+
+    assert refit["excluded_sheets"] == {
+        "V-2": "unreviewed_mounds",
+        "V-3": "absent_from_label_source",
+    }
+    assert refit["sheets_by_source"] == {"v0.0.3": ["D-1"], "v0.0.5": ["T-1", "V-1"]}
+    assert not any(
+        w["sheet_id"] == "V-2" for w in _jsonl(tmp_path / "refit/metadata/windows.jsonl")
+    )
+
+
+def test_a_rejected_mound_is_background_and_a_negative_is_a_region_whatever_its_status(
+    tmp_path: Path,
+) -> None:
+    report = RefitWorld(tmp_path).build()
+    out = tmp_path / "refit"
+
+    t1 = {
+        r["annotation_id"]
+        for r in _jsonl(out / "metadata/annotations.jsonl")
+        if r["sheet_id"] == "T-1"
+    }
+    assert t1 == {1}
+    labelled = [
+        w
+        for w in _jsonl(out / "metadata/windows.jsonl")
+        if w["sheet_id"] == "T-1" and w["targets"]
+    ]
+    assert {t["annotation_id"] for w in labelled for t in w["targets"]} == {1}
+    assert report["refit"]["rejected_mounds_as_background"] == {"count": 1, "by_sheet": {"T-1": 1}}
+    assert report["counts"]["rejected_mounds_as_background"] == 1
+    negative = next(
+        r for r in _jsonl(out / "metadata/regions.jsonl") if r["kind"] == "hard_negative_symbol"
+    )
+    assert (negative["sheet_id"], negative["negative_type"]) == ("T-1", "unreviewed")
+
+
+def test_a_train_window_over_an_ignore_box_is_recorded_but_not_listed_for_training(
+    tmp_path: Path,
+) -> None:
+    report = RefitWorld(tmp_path).build()
+    out = tmp_path / "refit"
+    dropped = ["D-1_1_x00000_y00000", "D-1_1_x00000_y00188"]
+
+    assert report["refit"]["uncertain_dropped_train_windows"] == {
+        "count": 2,
+        "window_ids": dropped,
+        "mound_targets_in_dropped": 2,
+    }
+    recorded = {w["window_id"] for w in _jsonl(out / "metadata/windows.jsonl")}
+    assert set(dropped) <= recorded
+    assert (out / "images" / f"{dropped[0]}.png").exists()
+    train = _lines(out / "train.txt")
+    assert not any(any(d in line for d in dropped) for line in train)
+    assert sum("D-1_1_" in line for line in train) == 4
+
+
+def test_a_val_window_over_an_ignore_box_stays_in_the_val_listing(tmp_path: Path) -> None:
+    report = RefitWorld(tmp_path).build()
+    out = tmp_path / "refit"
+
+    val_windows = [w for w in _jsonl(out / "metadata/windows.jsonl") if w["sheet_id"] == "V-1"]
+    assert report["listing"]["listings"]["val"]["windows"] == len(val_windows) == 6
+    assert len(_lines(out / "val.txt")) == 6
+    assert report["refit"]["uncertain_dropped_train_windows"]["count"] == 2
+
+
+def test_overlap_needs_positive_area() -> None:
+    """A box that only touches the window edge is not an overlap."""
+    window = Window(0, 0, 512)
+    assert not _overlaps(window, [512, 0, 10, 10])
+    assert not _overlaps(window, [-10, 0, 10, 10])
+    assert _overlaps(window, [511.5, 0, 10, 10])
+
+
+def test_the_human_added_share_is_counted_on_the_selection_sheets(tmp_path: Path) -> None:
+    report = RefitWorld(tmp_path).build()
+
+    assert report["refit"]["selection_human_added"] == {
+        "sheets": ["V-1"],
+        "mound_targets": 2,
+        "human_added": 1,
+        "share": 0.5,
+        "by_sheet": {"V-1": {"mound_targets": 2, "human_added": 1}},
+    }
+    assert _human_added_share([], ["V-1"])["share"] is None
+
+
+def _put_in_both(world: RefitWorld) -> None:
+    world.reviewed_images.append("D-1_1.png")
+    world.clips_by_sheet["D-1"] = ["D-1_1.png"]
+
+
+def _dev_sheet_missing(world: RefitWorld) -> None:
+    world.splits = {
+        **TRAIN_VAL_SPLITS,
+        "presets": {"loso_v0_5": {"folds": {"foldA": "D-1", "foldB": "D-2"}}},
+        "splits": {**TRAIN_VAL_SPLITS["splits"], "train": ["D-1", "D-2", "T-1"]},
+    }
+
+
+def _foreign_in_dev_source(world: RefitWorld) -> None:
+    world.dev_images.append("T-9_1.png")
+    world.splits = {
+        **TRAIN_VAL_SPLITS,
+        "splits": {**TRAIN_VAL_SPLITS["splits"], "train": ["D-1", "T-1", "T-9"]},
+    }
+
+
+def _test_sheet_appears(world: RefitWorld) -> None:
+    world.reviewed_images.append("X-1_1.png")
+    world.clips_by_sheet["X-1"] = ["X-1_1.png"]
+
+
+def _sheet_in_no_split(world: RefitWorld) -> None:
+    world.reviewed_images.append("Z-1_1.png")
+    world.clips_by_sheet["Z-1"] = ["Z-1_1.png"]
+
+
+def _dev_sheet_in_val(world: RefitWorld) -> None:
+    world.splits = {
+        **TRAIN_VAL_SPLITS,
+        "splits": {
+            **TRAIN_VAL_SPLITS["splits"],
+            "train": ["T-1"],
+            "val": ["D-1", "V-1", "V-2", "V-3"],
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("edit", "message"),
+    [
+        (_put_in_both, "sheet D-1 is in both v0.0.3 and v0.0.5"),
+        (_dev_sheet_missing, "development sheets missing from v0.0.3: \\['D-2'\\]"),
+        (_foreign_in_dev_source, "not development sheets: \\['T-9'\\]"),
+        (_test_sheet_appears, "test-split sheets are never used: \\['X-1'\\]"),
+        (_sheet_in_no_split, "sheets in no split: \\['Z-1'\\]"),
+        (_dev_sheet_in_val, "development sheets outside the train split"),
+        (
+            lambda w: w.clips_by_sheet.pop("T-1"),
+            "named by no clips.json: \\['T-1_1.png'\\]",
+        ),
+        (
+            lambda w: w.reviewed_annotations[0].pop("attributes"),
+            "without a review_status",
+        ),
+    ],
+)
+def test_train_val_stops_before_writing_anything(
+    tmp_path: Path, edit: Callable[[RefitWorld], Any], message: str
+) -> None:
+    world = RefitWorld(tmp_path, edit)
+
+    with pytest.raises(ValueError, match=message):
+        world.build()
+    assert not (tmp_path / "refit").exists()
+
+
+def test_train_val_stops_when_no_selection_sheet_remains(tmp_path: Path) -> None:
+    world = RefitWorld(
+        tmp_path,
+        lambda w: w.reviewed_annotations[3].update(attributes={"review_status": "unreviewed"}),
+    )
+    world.splits = {
+        **TRAIN_VAL_SPLITS,
+        "splits": {**TRAIN_VAL_SPLITS["splits"], "val": ["V-1", "V-2"]},
+    }
+
+    with pytest.raises(ValueError, match="no reviewed sheet of the val split remains"):
+        world.build()
+    assert not (tmp_path / "refit").exists()
+
+
+def test_train_val_refuses_a_reviewed_source_with_no_provenance(tmp_path: Path) -> None:
+    world = RefitWorld(tmp_path)
+    reviewed = world.config().label_sources[1].coco_json
+    (reviewed.parent / "PROVENANCE.json").unlink()
+
+    with pytest.raises(FileNotFoundError, match="PROVENANCE.json"):
+        world.build()
+    assert not (tmp_path / "refit").exists()
+
+
+def test_train_val_refuses_a_reviewed_source_edited_after_the_cut(tmp_path: Path) -> None:
+    world = RefitWorld(tmp_path)
+    reviewed = world.config().label_sources[1].coco_json
+    reviewed.write_text(reviewed.read_text(encoding="utf-8") + " ", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="not the file the cut wrote"):
+        world.build()
+    assert not (tmp_path / "refit").exists()
+
+
+def test_validate_export_reports_an_ambiguous_clip_with_the_other_violations(
+    tmp_path: Path,
+) -> None:
+    world = RefitWorld(tmp_path)
+    coco = json.loads(world.config().label_sources[0].coco_json.read_text(encoding="utf-8"))
+    second_root = tmp_path / "second"
+    (second_root / "train").mkdir(parents=True)
+    Image.new("RGBA", (900, 700)).save(second_root / "train" / "D-1_1.png")
+    coco["annotations"][0]["category_id"] = 99
+
+    with pytest.raises(ValueError, match="found 2 times") as error:
+        validate_export(coco, SCHEMA, [tmp_path / "images", second_root], None)
+    assert "unknown category id 99" in str(error.value)
+
+
+def test_train_val_refuses_arguments_that_differ_from_the_config(tmp_path: Path) -> None:
+    world = RefitWorld(tmp_path)
+    config = world.config()
+    cases = {
+        "requires a refit config": {"refit_config": None},
+        "window/stride 256/384": {"window_size": 256},
+        "label sources differ": {"label_sources": config.label_sources[:1]},
+        "requires --clips-json": {"clips_json_paths": None},
+    }
+    for message, overrides in cases.items():
+        with pytest.raises(ValueError, match=message):
+            build(
+                **{
+                    "label_sources": config.label_sources,
+                    "images_roots": [tmp_path / "images"],
+                    "output_dir": tmp_path / "refit",
+                    "window_size": 512,
+                    "stride": 384,
+                    "schema_path": SCHEMA,
+                    "plan": "train_val",
+                    "clips_json_paths": [tmp_path / "unused.json"],
+                    "refit_config": config,
+                    "splits_file": world.splits_path(),
+                    **overrides,
+                }
+            )
+    assert not (tmp_path / "refit").exists()
+
+
+def test_the_single_source_plans_refuse_a_refit_config(tmp_path: Path) -> None:
+    world = RefitWorld(tmp_path)
+    config = world.config()
+    with pytest.raises(ValueError, match="takes no refit config"):
+        _build(tmp_path, refit_config=config)
+
+
+def test_cli_keeps_window_and_stride_out_of_train_val_and_required_elsewhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    common = [
+        "--images-root",
+        str(tmp_path),
+        "--schema",
+        str(SCHEMA),
+        "--output-dir",
+        str(tmp_path / "o"),
+    ]
+    for argv in (
+        ["--listing", "train_val", "--refit-config", str(COMMITTED_CONFIG), "--window", "512"],
+        ["--listing", "train_val"],
+        ["--listing", "loso", "--coco-json", str(tmp_path / "c.json"), "--stride", "384"],
+        ["--listing", "loso", "--refit-config", str(COMMITTED_CONFIG)],
+    ):
+        monkeypatch.setattr("sys.argv", ["build", *common, *argv])
+        with pytest.raises(SystemExit):
+            bdw_main()
+    assert not (tmp_path / "o").exists()

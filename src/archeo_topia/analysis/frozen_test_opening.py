@@ -24,6 +24,10 @@ Order, and what each step guarantees:
 Each detector is scored once at every threshold (``evaluate_checkpoint``), and
 its raw detections go through its paired decoder at the headline confidence,
 both prompt arms, so detection and end-to-end numbers come from one inference.
+Opening 1 pairs fold X's detector with fold X's decoder. Opening 2 (the refit)
+has one detector, scored once, and runs its raw detections through each of the
+three frozen decoders; it needs a manifest extended with ``frozen_manifest
+extend`` and checks that the extension's selection record is the detector's.
 
 The code commit is recorded by the human in ``TEST_RESULTS.md``; this runner
 does not shell out to git.
@@ -34,6 +38,12 @@ Usage:
         --manifest docs/mapsam/v006/analysis/frozen_manifest.json \\
         --lake-root "$LAKE" --device cuda:0 \\
         --output-dir artifacts/detection/v0_6_test_baseline
+
+    python -m archeo_topia.analysis.frozen_test_opening \\
+        --opening v0_6_refit \\
+        --manifest docs/mapsam/v006/analysis/frozen_manifest.json \\
+        --lake-root "$LAKE" --device cuda:0 \\
+        --output-dir artifacts/detection/v0_6_refit/opening
 """
 
 from __future__ import annotations
@@ -62,19 +72,23 @@ from archeo_topia.analysis.mapsam_end_to_end import BOX_MODES, format_report, ru
 from archeo_topia.analysis.runtime import environment_record, resolve_device, write_record
 from archeo_topia.datasets.build_detection_windows import REPO_ROOT, repo_relative, sha256_file
 from archeo_topia.training.train_mound_detector import (
+    DETECTOR_IMGSZ,
     HEADLINE_CONFIDENCE,
+    MERGE_RADIUS,
     THRESHOLDS,
     evaluate_checkpoint,
+    require_selection,
 )
 
 logger = logging.getLogger(__name__)
 
-#: Which opening is being run. Opening 2 (the refit) adds a value here.
-Opening = Literal["v0_6_test_baseline"]
+#: Which opening is being run.
+Opening = Literal["v0_6_test_baseline", "v0_6_refit"]
+
+#: The label the refit detector's outputs go under.
+REFIT_DETECTOR_LABEL = "refit"
 
 #: Measurement constants of every opening. They are not flags: see the module docstring.
-DETECTOR_IMGSZ = 512
-MERGE_RADIUS = 10.0
 WINDOW_PX = 512
 IMAGE_SIZE = 1024
 
@@ -84,12 +98,16 @@ class Pair:
     """A detector checkpoint and the decoder its candidates go through.
 
     Attributes:
-        fold: Fold the pair was trained under, the label of its outputs.
+        fold: Fold the decoder was trained under, the label of the pair's
+            end-to-end outputs.
+        detector_label: Label of the detector's outputs. Pairs sharing a label
+            share one detector and one inference.
         detector: Repo-relative detector weights.
         decoder: Repo-relative decoder checkpoint.
     """
 
     fold: str
+    detector_label: str
     detector: Path
     decoder: Path
 
@@ -126,21 +144,59 @@ def pairs_for(opening: Opening, manifest: Mapping[str, Any]) -> list[Pair]:
         manifest: A verified manifest.
 
     Returns:
-        The pairs. The baseline pairs fold X's detector with fold X's decoder.
+        The pairs. The baseline pairs fold X's detector with fold X's decoder;
+        the refit pairs its one detector with every decoder.
 
     Raises:
         ValueError: If the detectors and decoders do not cover the same folds,
-            or the opening is unknown.
+            the refit detector is absent or repeated (the manifest is not
+            extended), or the opening is unknown.
     """
-    if opening != "v0_6_test_baseline":
+    if opening not in get_args(Opening):
         raise ValueError(f"unknown opening {opening!r}; have {list(get_args(Opening))}")
-    detectors = {e["fold"]: Path(e["path"]) for e in _entries(manifest, "detector")}
     decoders = {e["fold"]: Path(e["path"]) for e in _entries(manifest, "decoder")}
+    if opening == "v0_6_refit":
+        refit = _entries(manifest, "refit_detector")
+        if len(refit) != 1:
+            raise ValueError(
+                f"the manifest has {len(refit)} refit_detector entries, expected 1: "
+                "extend it with frozen_manifest extend first"
+            )
+        detector = Path(refit[0]["path"])
+        return [Pair(fold, REFIT_DETECTOR_LABEL, detector, decoders[fold]) for fold in decoders]
+    detectors = {e["fold"]: Path(e["path"]) for e in _entries(manifest, "detector")}
     if detectors.keys() != decoders.keys():
         raise ValueError(
             f"detector folds {sorted(detectors)} and decoder folds {sorted(decoders)} differ"
         )
-    return [Pair(fold, detectors[fold], decoders[fold]) for fold in detectors]
+    return [Pair(fold, fold, detectors[fold], decoders[fold]) for fold in detectors]
+
+
+def check_refit_selection(manifest: Mapping[str, Any], repo_root: Path) -> dict[str, str]:
+    """Check that the extension's selection record is the refit detector's.
+
+    Args:
+        manifest: A verified, extended manifest.
+        repo_root: Root of ``repo`` entries.
+
+    Returns:
+        The selection record's repo-relative path and sha256, for the run record.
+
+    Raises:
+        ValueError: If the selection is absent or repeated, names another
+            detector, or is not what the pre-registered rule yields.
+    """
+    selections = _entries(manifest, "refit_selection")
+    (detector,) = _entries(manifest, "refit_detector")
+    if len(selections) != 1:
+        raise ValueError(f"the manifest has {len(selections)} refit_selection entries, expected 1")
+    selection = json.loads((repo_root / selections[0]["path"]).read_text(encoding="utf-8"))
+    if selection["chosen"]["path"] != detector["path"]:
+        raise ValueError(
+            f"the selection chose {selection['chosen']['path']}, the manifest pins {detector['path']}"
+        )
+    require_selection(selection, repo_root)
+    return {"path": selections[0]["path"], "sha256": selections[0]["sha256"]}
 
 
 def inputs_from(manifest: Mapping[str, Any], repo_root: Path, lake_root: Path) -> Inputs:
@@ -217,24 +273,38 @@ def _score(
     device: torch.device,
     staging: Path,
 ) -> dict[str, Any]:
-    """Run every pair and write its outputs into the staging directory."""
-    metrics_by_fold: dict[str, Any] = {}
+    """Run every pair and write its outputs into the staging directory.
+
+    Each distinct detector label is inferred and scored once; every pair of that
+    label reuses its raw detections.
+
+    Returns:
+        The detector ``metrics.json`` document by detector label.
+    """
+    raw_by_label: dict[str, Any] = {}
+    metrics_by_label: dict[str, Any] = {}
+    detector_by_label: dict[str, Path] = {}
     for pair in pairs:
+        label = pair.detector_label
+        if detector_by_label.setdefault(label, pair.detector) != pair.detector:
+            raise ValueError(f"detector label {label!r} names two detectors")
         weights = repo_root / pair.detector
-        raw, metrics = evaluate_checkpoint(
-            weights=weights,
-            evaluation_set=evaluation_set,
-            imgsz=DETECTOR_IMGSZ,
-            merge_radius=MERGE_RADIUS,
-            thresholds=THRESHOLDS,
-            device=device,
-            output_dir=staging / "detector",
-            label=pair.fold,
-        )
-        metrics_by_fold[pair.fold] = metrics
-        logger.info("%s: %d raw detections", pair.fold, len(raw))
+        if label not in metrics_by_label:
+            raw, metrics = evaluate_checkpoint(
+                weights=weights,
+                evaluation_set=evaluation_set,
+                imgsz=DETECTOR_IMGSZ,
+                merge_radius=MERGE_RADIUS,
+                thresholds=THRESHOLDS,
+                device=device,
+                output_dir=staging / "detector",
+                label=label,
+            )
+            raw_by_label[label] = raw
+            metrics_by_label[label] = metrics
+            logger.info("%s: %d raw detections", label, len(raw))
         result = run_pair(
-            raw=raw,
+            raw=raw_by_label[label],
             detector_weights=weights,
             decoder_checkpoint=repo_root / pair.decoder,
             sam_checkpoint=inputs.sam_checkpoint,
@@ -252,7 +322,7 @@ def _score(
         fold_dir.mkdir(parents=True)
         write_record(fold_dir / "end_to_end.json", json.dumps(result, indent=2))
         write_record(fold_dir / "end_to_end.md", format_report({pair.fold: result}))
-    return metrics_by_fold
+    return metrics_by_label
 
 
 def run_opening(
@@ -266,7 +336,7 @@ def run_opening(
     """Open the frozen test set once.
 
     Args:
-        opening: Which opening.
+        opening: Which opening. ``v0_6_refit`` needs an extended manifest.
         manifest_path: The frozen manifest.
         lake_root: Root of ``lake`` entries.
         device_name: Requested torch device.
@@ -286,6 +356,7 @@ def run_opening(
     if output_dir.exists():
         raise FileExistsError(f"{output_dir} already exists; an opening never overwrites one")
     pairs = pairs_for(opening, manifest)
+    selection = check_refit_selection(manifest, repo_root) if opening == "v0_6_refit" else None
     inputs = inputs_from(manifest, repo_root, lake_root)
     evaluation_set = load_evaluation_set(
         inputs.dataset, inputs.dataset / "test.txt", inputs.sheets
@@ -293,28 +364,39 @@ def run_opening(
 
     environment = environment_record(device)
     manifest_record = {"path": repo_relative(manifest_path), "sha256": sha256_file(manifest_path)}
+    if selection is not None:
+        manifest_record["base_sha256"] = manifest["base"]["sha256"]
     started = datetime.now(UTC).isoformat()
 
     # The parent is not a record: it only has to exist for the staging directory.
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(dir=output_dir.parent, prefix=f".{output_dir.name}.staging-"))
     try:
-        metrics_by_fold = _score(pairs, inputs, evaluation_set, repo_root, device, staging)
-        write_record(
-            staging / "detector" / "across_checkpoints.json",
-            json.dumps(across_checkpoints(metrics_by_fold), indent=2),
-        )
-        record = {
+        metrics_by_label = _score(pairs, inputs, evaluation_set, repo_root, device, staging)
+        # Spread across checkpoints is the baseline's S; one detector has none.
+        if opening == "v0_6_test_baseline":
+            write_record(
+                staging / "detector" / "across_checkpoints.json",
+                json.dumps(across_checkpoints(metrics_by_label), indent=2),
+            )
+        record: dict[str, Any] = {
             "opening": opening,
             "manifest": manifest_record,
             "environment": environment,
             "pairs": [
-                {"fold": p.fold, "detector": str(p.detector), "decoder": str(p.decoder)}
+                {
+                    "fold": p.fold,
+                    "detector_label": p.detector_label,
+                    "detector": str(p.detector),
+                    "decoder": str(p.decoder),
+                }
                 for p in pairs
             ],
             "started_utc": started,
             "finished_utc": datetime.now(UTC).isoformat(),
         }
+        if selection is not None:
+            record["selection"] = selection
         write_record(staging / "run_record.json", json.dumps(record, indent=2))
         # rename(2) silently replaces an empty directory, so re-check right before it.
         if output_dir.exists():

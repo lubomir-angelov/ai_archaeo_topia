@@ -21,6 +21,7 @@ PROTOCOL_MODULES = (
     "analysis/frozen_test_opening.py",
     "analysis/frozen_manifest.py",
     "analysis/paired_comparison.py",
+    "formats/cut_review_export.py",
 )
 
 #: Each entry is a reviewed ``exist_ok=True`` that does not touch a record.

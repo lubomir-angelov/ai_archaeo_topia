@@ -5,13 +5,30 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from PIL import Image
 
+from archeo_topia.analysis.detection_metrics import RECALL_RADII, confidence_key
 from archeo_topia.analysis.frozen_manifest import ManifestSources
-from archeo_topia.datasets.build_detection_windows import FOLDS, REPO_ROOT, build, sha256_file
+from archeo_topia.datasets.build_detection_windows import (
+    FOLDS,
+    REPO_ROOT,
+    LabelSource,
+    build,
+    load_refit_config,
+    refit_candidates,
+    sha256_file,
+)
+from archeo_topia.training.train_mound_detector import (
+    DETECTOR_IMGSZ,
+    HEADLINE_CONFIDENCE,
+    MERGE_RADIUS,
+    SELECTION_RULE,
+)
 
 SCHEMA = REPO_ROOT / "annotation" / "cvat" / "labels.json"
+COMMITTED_CONFIG = REPO_ROOT / "configs" / "refit" / "v0_6_refit.json"
 SHEETS = ("S-1", "S-2")
 GROUND_TRUTH = Path("annotation/frozen/instances_Test.json")
 DATASET = Path("data/ds")
@@ -81,14 +98,15 @@ def make_world(tmp_path: Path) -> World:
         encoding="utf-8",
     )
     build(
-        repo / GROUND_TRUTH,
-        lake / clips_dir,
+        [LabelSource(GROUND_TRUTH.parent.name, repo / GROUND_TRUTH, "all")],
+        [lake / clips_dir],
         repo / DATASET,
         window_size=512,
         stride=384,
         schema_path=SCHEMA,
         plan="test",
         clips_json_paths=clips_json,
+        refit_config=None,
         splits_file=splits,
     )
 
@@ -115,3 +133,89 @@ def make_world(tmp_path: Path) -> World:
         splits_file=splits,
     )
     return World(sources, tmp_path / "manifest.json")
+
+
+SELECTION = Path("refit/selection.json")
+TRAIN_RECORD = Path("refit/train_record.json")
+CONFIG = Path("configs/refit/v0_6_refit.json")
+CHOSEN = Path("refit/weights/epoch100.pt")
+WEIGHTS_DIR = Path("refit/weights")
+
+
+def _metrics(hits: int, false_positives: int) -> dict[str, Any]:
+    """The slice of a ``metrics.json`` the selection reads at the headline confidence."""
+    return {
+        "by_confidence": {
+            confidence_key(HEADLINE_CONFIDENCE): {
+                "pooled": {
+                    "annotations": 4,
+                    "recall": {f"{RECALL_RADII[0]:g}": {"hits": hits}},
+                    "false_positives": {"count": false_positives},
+                }
+            }
+        }
+    }
+
+
+def write_selection(world: World, **edits: Any) -> Path:
+    """Write a consistent refit ``selection.json`` and everything it proves from.
+
+    The training record, the config, every candidate's weights and metrics are
+    written into the synthetic repo, so ``require_selection`` verifies the real
+    chain; ``edits`` then override top-level keys of the selection document.
+    """
+    repo = world.sources.repo_root
+    (repo / CONFIG).parent.mkdir(parents=True, exist_ok=True)
+    (repo / TRAIN_RECORD).parent.mkdir(parents=True, exist_ok=True)
+    (repo / CONFIG).write_bytes(COMMITTED_CONFIG.read_bytes())
+    config = load_refit_config(repo / CONFIG)
+    dataset = {"path": DATASET.as_posix(), "build_report_sha256": "0" * 64}
+    (repo / TRAIN_RECORD).write_text(
+        json.dumps(
+            {
+                "config": {"path": CONFIG.as_posix(), "sha256": config.sha256},
+                "dataset": dataset,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rows = []
+    for name in refit_candidates(config):
+        weights = WEIGHTS_DIR / name
+        metrics = Path("refit") / Path(name).stem / "metrics.json"
+        (repo / weights).parent.mkdir(parents=True, exist_ok=True)
+        (repo / metrics).parent.mkdir(parents=True, exist_ok=True)
+        (repo / weights).write_bytes(f"refit weights {name}".encode())
+        # epoch100 alone has the most hits, so the rule chooses it.
+        hits = 3 if name == CHOSEN.name else 2
+        (repo / metrics).write_text(json.dumps(_metrics(hits, 1)), encoding="utf-8")
+        rows.append(
+            {
+                "file": name,
+                "path": weights.as_posix(),
+                "sha256": sha256_file(repo / weights),
+                "hits": hits,
+                "total": 4,
+                "false_positives": 1,
+                "windows": 6,
+                "metrics": metrics.as_posix(),
+            }
+        )
+    chosen = next(row for row in rows if row["file"] == CHOSEN.name)
+    document = {
+        "train_record": {
+            "path": TRAIN_RECORD.as_posix(),
+            "sha256": sha256_file(repo / TRAIN_RECORD),
+        },
+        "dataset": dataset,
+        "confidence": confidence_key(HEADLINE_CONFIDENCE),
+        "imgsz": DETECTOR_IMGSZ,
+        "merge_radius": MERGE_RADIUS,
+        "rule": list(SELECTION_RULE),
+        "candidates": rows,
+        "chosen": {key: chosen[key] for key in ("file", "path", "sha256")},
+        **edits,
+    }
+    (repo / SELECTION).write_text(json.dumps(document), encoding="utf-8")
+    return SELECTION

@@ -9,6 +9,13 @@ Entries carry a ``root`` (``repo`` or ``lake``) and a path relative to it, so
 the committed file holds no host path. Hashing is byte-level and touches no
 model output: writing or verifying a manifest is not an opening.
 
+**A manifest is written once and extended once.** ``extend`` appends the refit
+detector and its ``selection.json`` for opening 2 and nothing else. It first
+re-verifies every existing entry, then records the sha256 of the pre-extension
+file and the number of its entries under ``base``. ``verify`` re-derives that
+hash from ``entries[:N]``, so the opening-1 entries are provably the bytes
+opening 1 verified, and an extended manifest still pins them.
+
 Usage:
     python -m archeo_topia.analysis.frozen_manifest write \\
         --lake-root "$LAKE" --clips-dir cleaned/map_clips/_frozen \\
@@ -20,6 +27,10 @@ Usage:
         --dataset data/curated/datasets/mapsam_det_frozen_v001 \\
         --output docs/mapsam/v006/analysis/frozen_manifest.json
 
+    python -m archeo_topia.analysis.frozen_manifest extend \\
+        --manifest docs/mapsam/v006/analysis/frozen_manifest.json --lake-root "$LAKE" \\
+        --selection artifacts/detection/v0_6_refit/selection/selection.json
+
     python -m archeo_topia.analysis.frozen_manifest verify \\
         --manifest docs/mapsam/v006/analysis/frozen_manifest.json --lake-root "$LAKE"
 """
@@ -27,8 +38,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, get_args
@@ -39,12 +52,15 @@ from archeo_topia.datasets.build_detection_windows import (
     FOLDS,
     REPO_ROOT,
     SPLITS_FILE,
-    crops_digest,
+    build_output_problems,
     load_split_document,
     sha256_file,
 )
 from archeo_topia.formats.georeference import SheetReference
-from archeo_topia.training.train_mound_detector import fold_weights_path
+from archeo_topia.training.train_mound_detector import (
+    fold_weights_path,
+    require_selection,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,10 +76,15 @@ Role = Literal[
     "decoder",
     "sam_base",
     "windows_build_report",
+    "refit_detector",
+    "refit_selection",
 ]
 
 #: Roles that appear exactly once in a manifest.
 SINGLE_ROLES: tuple[str, ...] = ("ground_truth", "sam_base", "windows_build_report")
+
+#: Roles ``extend`` appends after the base entries, in this order.
+REFIT_ROLES: tuple[str, ...] = ("refit_detector", "refit_selection")
 
 #: First cell of the ``SOURCE.md`` table row that carries the ground-truth hash.
 SOURCE_HASH_ROW = "`instances_Test.json` sha256"
@@ -160,6 +181,15 @@ def _entry(role: str, root: Root, base: Path, relative: Path, **keys: str) -> di
     }
 
 
+def manifest_text(manifest: dict[str, Any]) -> str:
+    """Return the canonical serialization of a manifest.
+
+    It is the one definition of the bytes a manifest file holds, so the hash
+    recorded under ``base`` can be re-derived from the parsed entries.
+    """
+    return json.dumps(manifest, indent=2) + "\n"
+
+
 def _require_relative(path: Path, name: str) -> None:
     """Require a path argument that is relative to its root."""
     if path.is_absolute():
@@ -195,12 +225,13 @@ def _check_build_report(
     report_path = sources.repo_root / sources.dataset / "metadata" / "build_report.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
     problems: list[str] = []
-    if not _recorded_path_is(
-        report["inputs"]["coco_json"], sources.ground_truth, sources.repo_root
+    label_sources = report["inputs"]["label_sources"]
+    if len(label_sources) != 1 or not _recorded_path_is(
+        label_sources[0]["coco_json"], sources.ground_truth, sources.repo_root
     ):
         problems.append(
-            f"built from {report['inputs']['coco_json']!r}, not the ground truth "
-            f"{sources.ground_truth}"
+            f"built from {[s['coco_json'] for s in label_sources]!r}, not the ground truth "
+            f"{sources.ground_truth} alone"
         )
     if report["listing"]["plan"] != "test":
         problems.append(f"listing plan is {report['listing']['plan']!r}, not 'test'")
@@ -231,50 +262,6 @@ def _check_build_report(
         raise ValueError(
             f"{report_path} is not the frozen windows build:\n  " + "\n  ".join(problems)
         )
-
-
-def build_output_problems(dataset: Path) -> list[str]:
-    """Compare a windows dataset with the hashes its ``build_report.json`` recorded.
-
-    Args:
-        dataset: Windows dataset root.
-
-    Returns:
-        One message per file whose hash differs or that is missing. Empty when
-        the dataset is what the report says it is.
-    """
-    report = json.loads((dataset / "metadata" / "build_report.json").read_text(encoding="utf-8"))
-    problems: list[str] = []
-    mismatched: set[str] = set()
-    for name, recorded in report["outputs_sha256"].items():
-        if name == "crops":
-            continue
-        try:
-            actual = sha256_file(dataset / name)
-        except FileNotFoundError:
-            problems.append(f"{dataset / name}: missing")
-            mismatched.add(name)
-            continue
-        if actual != recorded:
-            problems.append(f"{dataset / name}: sha256 differs from build_report.json")
-            mismatched.add(name)
-    if "metadata/windows.jsonl" in mismatched:
-        problems.append(f"{dataset}: crops not checked, windows.jsonl does not match its report")
-        return problems
-    window_ids = [
-        json.loads(line)["window_id"]
-        for line in (dataset / "metadata" / "windows.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
-    ]
-    try:
-        digest = crops_digest(dataset, window_ids)
-    except FileNotFoundError as error:
-        problems.append(f"{dataset}: crop missing: {error.filename}")
-        return problems
-    if digest != report["outputs_sha256"]["crops"]:
-        problems.append(f"{dataset}/images: crops digest differs from build_report.json")
-    return problems
 
 
 def write_manifest(sources: ManifestSources, output: Path) -> dict[str, Any]:
@@ -374,13 +361,56 @@ def write_manifest(sources: ManifestSources, output: Path) -> dict[str, Any]:
     )
 
     manifest = {"entries": entries}
-    write_record(output, json.dumps(manifest, indent=2) + "\n")
+    write_record(output, manifest_text(manifest))
     logger.info("wrote %d entries to %s", len(entries), output)
     return manifest
 
 
+def _base_problems(manifest: dict[str, Any]) -> list[str]:
+    """Check the refit extension of a manifest, or that there is none."""
+    entries = manifest["entries"]
+    roles = [e.get("role") for e in entries]
+    if "base" not in manifest:
+        return [
+            f"entry {i}: role {r!r} needs a base" for i, r in enumerate(roles) if r in REFIT_ROLES
+        ]
+    base = manifest["base"]
+    count = base.get("entries") if isinstance(base, dict) else None
+    if (
+        not isinstance(base, dict)
+        or set(base) != {"entries", "sha256"}
+        or type(count) is not int
+        or not 0 < count < len(entries)
+    ):
+        return [f"base {base!r} is not {{entries: N with 0 < N < {len(entries)}, sha256}}"]
+    problems: list[str] = []
+    digest = base["sha256"]
+    if (
+        not isinstance(digest, str)
+        or len(digest) != _SHA256_LENGTH
+        or not set(digest) <= _HEX_DIGITS
+    ):
+        problems.append(f"base sha256 {digest!r} is not a digest")
+    if any(role in REFIT_ROLES for role in roles[:count]):
+        problems.append("the base entries hold a refit role")
+    if tuple(roles[count:]) != REFIT_ROLES:
+        problems.append(
+            f"entries after the base are {roles[count:]}, expected {list(REFIT_ROLES)}"
+        )
+    if not problems and _base_sha256(entries[:count]) != digest:
+        problems.append("the entries before the extension do not hash to the recorded base sha256")
+    return problems
+
+
+def _base_sha256(entries: list[dict[str, Any]]) -> str:
+    """Return the hash of the canonical text of a manifest holding only these entries."""
+    return hashlib.sha256(manifest_text({"entries": entries}).encode("utf-8")).hexdigest()
+
+
 def _shape_problems(manifest: dict[str, Any]) -> list[str]:
-    """Check that a manifest is structurally what ``write_manifest`` produces."""
+    """Check that a manifest is structurally what ``write_manifest`` and ``extend`` produce."""
+    if "entries" not in manifest or set(manifest) not in ({"entries"}, {"entries", "base"}):
+        return [f"top-level keys {sorted(manifest)} are not 'entries' with an optional 'base'"]
     problems: list[str] = []
     entries = manifest["entries"]
     required = {"role", "root", "path", "sha256"}
@@ -407,7 +437,7 @@ def _shape_problems(manifest: dict[str, Any]) -> list[str]:
     problems += [
         f"role {role!r} appears {n} times, expected 1" for role, n in counts.items() if n != 1
     ]
-    return problems
+    return problems + _base_problems(manifest)
 
 
 def verify_manifest(manifest_path: Path, lake_root: Path, repo_root: Path) -> dict[str, Any]:
@@ -455,6 +485,68 @@ def verify_manifest(manifest_path: Path, lake_root: Path, repo_root: Path) -> di
     return manifest
 
 
+def extend_manifest(
+    manifest_path: Path, lake_root: Path, repo_root: Path, selection: Path
+) -> dict[str, Any]:
+    """Append the refit detector and its selection record to a verified manifest.
+
+    The extension is staged in ``<manifest>.extending``, verified in full, and
+    moved over the manifest with one ``os.replace``, which is the only place a
+    manifest file is ever replaced. Nothing is deleted on failure: a leftover
+    ``.extending`` file stops the next attempt, so the operator looks at it.
+
+    Args:
+        manifest_path: A verified, canonical, not yet extended manifest.
+        lake_root: Root that ``lake`` entries are relative to.
+        repo_root: Root that ``repo`` entries are relative to.
+        selection: Repo-relative ``selection.json`` of the refit.
+
+    Returns:
+        The extended manifest.
+
+    Raises:
+        ValueError: If the manifest does not verify, is already extended, is
+            not in canonical form, or the selection is not valid (see
+            ``require_selection``).
+        FileExistsError: If a staging file is left over.
+    """
+    manifest = verify_manifest(manifest_path, lake_root, repo_root)
+    if "base" in manifest:
+        raise ValueError(f"{manifest_path} is already extended; a manifest is extended once")
+    text = manifest_path.read_text(encoding="utf-8")
+    if text != manifest_text(manifest):
+        raise ValueError(
+            f"{manifest_path} is not in canonical form, so its base hash is unprovable"
+        )
+    base_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    _require_relative(selection, "selection")
+    chosen = json.loads((repo_root / selection).read_text(encoding="utf-8"))
+    require_selection(chosen, repo_root)
+    chosen_path = Path(chosen["chosen"]["path"])
+    _require_relative(chosen_path, "chosen path")
+    refit_detector = _entry(
+        "refit_detector", "repo", repo_root, chosen_path, checkpoint=chosen["chosen"]["file"]
+    )
+    refit_selection = _entry("refit_selection", "repo", repo_root, selection)
+    extended = {
+        "entries": [*manifest["entries"], refit_detector, refit_selection],
+        "base": {"entries": len(manifest["entries"]), "sha256": base_sha256},
+    }
+    staged = manifest_path.with_name(manifest_path.name + ".extending")
+    write_record(staged, manifest_text(extended))
+    try:
+        verify_manifest(staged, lake_root, repo_root)
+        if sha256_file(manifest_path) != base_sha256:
+            raise ValueError(f"{manifest_path} changed while it was being extended")
+        os.replace(staged, manifest_path)
+    except BaseException:
+        logger.error("extension failed; the staged file is kept at %s", staged)
+        raise
+    logger.info("extended %s to %d entries", manifest_path, len(extended["entries"]))
+    return extended
+
+
 def main() -> None:
     """Parse arguments and write or verify a manifest."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
@@ -471,6 +563,11 @@ def main() -> None:
     write.add_argument("--sam-checkpoint", type=Path, required=True)
     write.add_argument("--dataset", type=Path, required=True)
     write.add_argument("--output", type=Path, required=True)
+
+    extend = commands.add_parser("extend", help="append the refit detector and its selection")
+    extend.add_argument("--manifest", type=Path, required=True)
+    extend.add_argument("--lake-root", type=Path, required=True)
+    extend.add_argument("--selection", type=Path, required=True)
 
     verify = commands.add_parser("verify", help="recompute every hash in a manifest")
     verify.add_argument("--manifest", type=Path, required=True)
@@ -497,6 +594,11 @@ def main() -> None:
             ),
             args.output,
         )
+    elif args.command == "extend":
+        extended = extend_manifest(args.manifest, args.lake_root, REPO_ROOT, args.selection)
+        print(f"base sha256 {extended['base']['sha256']}")
+        print(f"new sha256  {sha256_file(args.manifest)}")
+        print(f"{len(extended['entries'])} entries")
     else:
         manifest = verify_manifest(args.manifest, args.lake_root, REPO_ROOT)
         print(f"verified {len(manifest['entries'])} entries")

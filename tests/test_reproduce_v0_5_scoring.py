@@ -454,7 +454,7 @@ def test_a_fold_is_run_once_and_scored_under_both_region_inputs(
     monkeypatch.setattr(repro, "predict_windows", predict)
     monkeypatch.setattr(repro, "segment_candidates", segment)
     monkeypatch.setattr(repro, "load_mapsam", lambda *a: object())
-    monkeypatch.setattr(repro, "find_image", lambda root, name: root / name)
+    monkeypatch.setattr(repro, "find_image", lambda roots, name: roots[0] / name)
     monkeypatch.setattr(repro, "load_truth_masks", lambda coco, es: {("S-1_1.png", 1): truth})
 
     detector_run = tmp_path / "run"

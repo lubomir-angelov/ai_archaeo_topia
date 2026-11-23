@@ -1,0 +1,15 @@
+{
+  "name": "v0_6_refit",
+  "label_sources": [
+    {"name": "v0.0.3", "coco_json": "annotation/cvat/v0.0.3/instances_default.json", "mound_rule": "all"},
+    {"name": "v0.0.5", "coco_json": "annotation/cvat/v0.0.5/instances_default.json", "mound_rule": "reviewed"}
+  ],
+  "development_source": "v0.0.3",
+  "window": 512,
+  "stride": 384,
+  "model": "yolo26s.pt",
+  "epochs": 150,
+  "batch": 16,
+  "seed": 42,
+  "save_period": 25
+}

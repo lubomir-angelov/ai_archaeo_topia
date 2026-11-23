@@ -657,7 +657,7 @@ def main() -> None:
         weights = fold_weights_path(args.detector_run, fold)
         raw = predict_windows(weights, evaluation_set, args.detector_imgsz, MIN_CONFIDENCE, device)
         clip_paths = {
-            name: find_image(args.images_root, name) for name in evaluation_set.image_sheet
+            name: find_image((args.images_root,), name) for name in evaluation_set.image_sheet
         }
         results[fold] = run_pair(
             raw=raw,

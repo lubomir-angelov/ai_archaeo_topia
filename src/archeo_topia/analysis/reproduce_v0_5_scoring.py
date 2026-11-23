@@ -103,7 +103,9 @@ from archeo_topia.datasets.build_detection_windows import (
     sha256_file,
 )
 from archeo_topia.training.train_mound_detector import (
+    DETECTOR_IMGSZ,
     HEADLINE_CONFIDENCE,
+    MERGE_RADIUS,
     MIN_CONFIDENCE,
     THRESHOLDS,
     fold_weights_path,
@@ -116,9 +118,7 @@ from archeo_topia.training.train_mound_detector import (
 
 logger = logging.getLogger(__name__)
 
-#: Detector inference settings of v0.5 (``RESULTS.md``).
-DETECTOR_IMGSZ = 512
-MERGE_RADIUS = 10.0
+#: Window and clip size of the v0.5 end-to-end scoring (``RESULTS.md``).
 WINDOW_PX = 512
 IMAGE_SIZE = 1024
 
@@ -708,7 +708,7 @@ def _end_to_end_variants(
     """
     v0e_set = dataclasses.replace(v0_set, ignore_regions=())
     candidates = resolve_candidates(raw, HEADLINE_CONFIDENCE, MERGE_RADIUS)
-    clip_paths = {name: find_image(inputs.images_root, name) for name in v1_set.image_sheet}
+    clip_paths = {name: find_image((inputs.images_root,), name) for name in v1_set.image_sheet}
     truth_masks = load_truth_masks(inputs.coco_json, v1_set)
     sam = load_mapsam(decoder, inputs.sam_checkpoint, device)
 

@@ -514,6 +514,8 @@ python -m archeo_topia.analysis.mapsam_end_to_end \
   --output-dir artifacts/detection/v0_5_end_to_end
 ```
 
+The trainer CLI now takes a `loso` subcommand and no longer accepts `--imgsz` (512 is fixed as `DETECTOR_IMGSZ`); the current equivalent is `python -m archeo_topia.training.train_mound_detector loso --dataset data/curated/datasets/mapsam_det_v1 --output-dir artifacts/detection/v0_5_yolo26s_gtfix --fold all --model yolo26s.pt --epochs 150 --batch 16 --save-period 25`.
+
 Step 5 needs both optional extras together, `.[sam,detect]`: it spans the
 detector and the decoder.
 
