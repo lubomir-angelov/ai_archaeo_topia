@@ -9,8 +9,37 @@ learned from three annotated sheets. The corpus is swept, the schema is fixed,
 the splits are permanent, 57 sheets are packaged, and **the team has started
 reviewing them**. The return path now keeps rejections as well as confirmations,
 so the review will produce training data and not only a precision figure. The
-project is still waiting on one thing, and it is human: **nobody has annotated
-the blind test set, so there is still no test result.**
+project was waiting on one thing, and it was human: annotating the blind test
+set. **That is now done and both openings of the frozen test are scored (see
+"Test protocol status" below), so there are test results.**
+
+---
+
+## Test protocol status
+
+Both openings of the frozen blind test are done, and the v0.6 test protocol
+(`TEST_PROTOCOL.md`) is complete. The set is now closed: nothing further may be
+scored on it. Full tables, the opening records and the observations are in
+`TEST_RESULTS.md`; this section only points at them.
+
+| opening | what was scored | artifacts |
+|---|---|---|
+| **1, baseline** | the v0.5 detector of record (three fold checkpoints) with the v0.4r decoders | `artifacts/detection/v0_6_test_baseline/` |
+| **2, refit** | the detector refit on the permanent train split, checkpoint `epoch125.pt` chosen on validation, with the same three frozen decoders | `artifacts/detection/v0_6_refit/` (`opening/`, `paired.json`, `selection/`, `train/`) |
+
+Headline, pooled recall@5px at confidence 0.25 on the 249 test annotations:
+the refit hits 225 (0.904); the baseline folds hit 198, 200 and 204 (0.795,
+0.803, 0.819). The pre-registered paired comparison falls in case 1, `improves`:
+exact two-sided McNemar p < 0.05 against all three baseline folds, and the
+margin over the best baseline (21 hits) exceeds the baseline spread (6 hits).
+The wording the protocol allows is "The refit improves recall." The refit's
+precision is 0.991 (2 false positives). The weakest sheet for both detectors is
+`K-35-39-V-g` (refit recall@5px 0.610, baseline 0.424 to 0.492).
+
+Caveat carried with these numbers: the refit checkpoint was selected on
+validation sheets whose labels come from a model-assisted review (`human_added`
+11/308 on the selection sheets), so selection may slightly favour checkpoints
+that behave like v0.5; the frozen test set, annotated blind, is the judge.
 
 ---
 
@@ -21,9 +50,9 @@ the blind test set, so there is still no test result.**
 | | |
 |---|---|
 | **Step 1, blind sweep** | The unchanged v0.5 detector over the 56 working sheets with all three fold checkpoints. 8,671 windows, 1,232.4 Mpx. Candidate density 1.31–2.10 per Mpx against 2.55 mounds/Mpx on the annotated clips — same order and lower, which is what whole sheets containing uninformative terrain should do. Excluding central Sofia, the three checkpoints agree to within **0.14 candidates per Mpx over 55 unseen sheets**. |
-| **Step 2, annotate the blind set** | **Not attempted.** Human work, and the gate on everything. |
+| **Step 2, annotate the blind set** | **Done** after this section was written: frozen ground truth `annotation/cvat/frozen_test/v0.0.1`. |
 | **Step 3, model-assisted annotation** | Tooling built and verified through CVAT's own importer; one sheet imported by hand. The volume pass has not run. |
-| **Step 4, first test result** | Blocked on step 2. |
+| **Step 4, first test result** | **Done**: opening 1 (baseline) and opening 2 (refit), results in `TEST_RESULTS.md`. |
 | **Schema** | `crossed_by_water_line` → `water_line_crossing`, a four-value select (`none` / `surface` / `underground` / `unreviewed`) rather than the two booleans the plan asked for, because two booleans would manufacture 105 assertions no annotator made. `review_status` added as a separate axis from `annotation_provenance`. `annotation/cvat/labels.json` is now the machine-readable schema of record. Applied as `annotation/cvat/v0.0.3`: 714 annotations, geometry byte-identical. |
 | **Splits** | `configs/splits/v0_6_splits.json`, grouped on the 1:100k parent rather than the 1:25k sheet id, because adjacent quadrants of one 1:50k sheet share terrain, survey campaign, print run and scan batch. |
 | **Format classes** | `archeo_topia.formats` — `LabelSchema`, `CocoDocument`, `SheetReference`, `FeatureCollection`. One mask decoder replaces two that disagreed. GDAL appears only as a subprocess, enforced by a test. |

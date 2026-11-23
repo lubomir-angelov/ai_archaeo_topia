@@ -390,3 +390,248 @@ Source: `artifacts/detection/v0_6_refit/selection/selection.json` (listing `val.
 ### Deviations from the pre-registered refit
 
 None found. Compared against the protocol table: model `yolo26s.pt`, imgsz 512, epochs 150, batch 16, seed 42, early stopping disabled, windows 512/384, exactly two label sources with no shared sheet, the `all` and `reviewed` mound rules, train and selection sheets from the `train` and `val` splits, no test-split sheet, six checkpoint candidates scored at confidence 0.25 with `best.pt` unused, and artifacts under `artifacts/detection/v0_6_refit/`. The one excluded sheet (`K-34-47-G-v`) falls under the reviewed-sheet rule and is not a deviation. The `rejected` mound rule did not trigger (0 rejected mounds as background).
+---
+
+## Opening 2 — the refit (`v0_6_refit`)
+
+Opening 2 of the frozen blind test: the refit detector (`epoch125.pt`, chosen on the validation sheets before this opening) with the three frozen v0.4r decoders, scored on the same frozen test set as opening 1. Source: `artifacts/detection/v0_6_refit/` (`opening/run_record.json`, `opening/detector/refit/metrics.json`, `opening/end_to_end/fold{A,B,C}/end_to_end.json`, `paired.json`). Every figure below is copied or computed from those files and from the opening-1 files named above. Rates are shown to the three decimals the run reports use. The 95% intervals are Wilson intervals that treat instances as independent and understate the uncertainty. Both openings of the frozen test are now used; nothing further may be scored on it.
+
+### Opening record
+
+- Started (UTC): 2026-11-23T14:04:00.400764+00:00
+- Finished (UTC): 2026-11-23T14:05:47.741120+00:00
+- Manifest: `docs/mapsam/v006/analysis/frozen_manifest.json`, sha256 `e93885a28326c99589f67ec8007f64287479b58e77151ee46c5f46df59dcb6c9` (base sha256 `5d111b38a52da5ca265cd653faba928b9e124a7b15513c26ef58b3724140fd0c`, equal to the manifest sha256 of opening 1)
+- Environment: python 3.13.5, torch 2.14.0, ultralytics 8.4.150, segment_anything 1.0; device `cuda:0` (NVIDIA GeForce RTX 5090)
+- Selection record: `artifacts/detection/v0_6_refit/selection/selection.json`, sha256 `f2822f674217a01a0f350e8d6919457cbd07a56a8852d0c3c2de97d5aeeb4007`
+- Test set: dataset `data/curated/datasets/mapsam_det_frozen_v001`, listing `test.txt`, sheets K-35-22-A-v, K-35-39-G-v, K-35-39-V-g, L-35-139-V-v; 249 annotations
+- Settings: imgsz 512, minimum confidence 0.05, merge radius 10.0 px, association radius 25.0 px (one-to-one), recall radii [5.0, 10.0, 15.0, 25.0], attribution radius 15.0 px, thresholds [0.05, 0.1, 0.25, 0.5, 0.7], headline confidence 0.25
+- Detector label `refit`; pairs (detector, decoder):
+  - foldA: `artifacts/detection/v0_6_refit/train/refit/weights/epoch125.pt`, `artifacts/models/mapsam/v0_4r_loso512_foldA_pw20/checkpoints/final.pt`
+  - foldB: `artifacts/detection/v0_6_refit/train/refit/weights/epoch125.pt`, `artifacts/models/mapsam/v0_4r_loso512_foldB_pw20/checkpoints/final.pt`
+  - foldC: `artifacts/detection/v0_6_refit/train/refit/weights/epoch125.pt`, `artifacts/models/mapsam/v0_4r_loso512_foldC_pw20/checkpoints/final.pt`
+- SAM checkpoint: `models/checkpoints/sam/sam_vit_b_01ec64.pth`; end-to-end box modes ['fixed', 'detector']
+
+One refit detector is paired with three frozen decoders. The detector-level figures are therefore one set of numbers (the three fold rows differ only end to end). The decoder is not refit.
+
+### Detector, headline confidence 0.25, pooled
+
+FP/MP is false positives per megapixel; its area is the full clip rectangle, including any transparent margin (Fork 2 A).
+
+| candidates | recall@5px (primary) hits/n, 95% CI | recall@10px | recall@15px | recall@25px |
+|---:|---|---|---|---|
+| 227 | 0.904 (225/249, 0.861–0.934) | 0.904 (225/249, 0.861–0.934) | 0.904 (225/249, 0.861–0.934) | 0.904 (225/249, 0.861–0.934) |
+
+| precision hits/n, 95% CI | F1 | FP | FP per 512 px window | FP per megapixel | localization p50 px | localization p90 px | neutralized by ignore |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0.991 (225/227, 0.968–0.998) | 0.945 | 2 | 0.0032 | 0.0233 | 1.41 | 2.51 | 0 |
+
+False positives by what they land on: by negative_type none; hard negative without a negative_type 0; background 2.
+
+### Detector, confidence 0.05 (recall-oriented, second), pooled
+
+FP/MP is false positives per megapixel; its area is the full clip rectangle, including any transparent margin (Fork 2 A).
+
+| candidates | recall@5px (primary) hits/n, 95% CI | recall@10px | recall@15px | recall@25px |
+|---:|---|---|---|---|
+| 235 | 0.904 (225/249, 0.861–0.934) | 0.904 (225/249, 0.861–0.934) | 0.904 (225/249, 0.861–0.934) | 0.904 (225/249, 0.861–0.934) |
+
+| precision hits/n, 95% CI | F1 | FP | FP per 512 px window | FP per megapixel | localization p50 px | localization p90 px | neutralized by ignore |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 0.957 (225/235, 0.923–0.977) | 0.930 | 10 | 0.0160 | 0.1164 | 1.41 | 2.51 | 0 |
+
+False positives by what they land on: by negative_type `road` 1, `decorative_symbol` 1; hard negative without a negative_type 0; background 8.
+
+### Per sheet and macro (confidence 0.25)
+
+† fewer than 50 annotations on the sheet (the rule used by the run reports).
+
+| sheet | n | recall@5px hits/n, 95% CI | recall@25px | precision | FP | FP/window | p90 px |
+|---|---:|---|---:|---:|---:|---:|---:|
+| K-35-22-A-v | 82 | 0.988 (81/82, 0.934–0.998) | 0.988 | 0.988 | 1 | 0.0069 | 2.70 |
+| K-35-39-G-v | 98 | 1.000 (98/98, 0.962–1.000) | 1.000 | 0.990 | 1 | 0.0060 | 2.30 |
+| K-35-39-V-g | 59 | 0.610 (36/59, 0.483–0.724) | 0.610 | 1.000 | 0 | 0.0000 | 2.02 |
+| L-35-139-V-v † | 10 | 1.000 (10/10, 0.722–1.000) | 1.000 | 1.000 | 0 | 0.0000 | 1.75 |
+
+Macro over sheets (unweighted mean of the four sheets, with min and max):
+
+| recall@5px | recall@25px | precision | F1 | p90 px | FP/window | FP/MP |
+|---|---|---|---|---|---|---|
+| 0.899 (0.610–1.000) | 0.899 (0.610–1.000) | 0.994 (0.988–1.000) | 0.935 (0.758–1.000) | 2.19 (1.75–2.70) | 0.0032 (0.0000–0.0069) | 0.0229 (0.0000–0.0463) |
+
+### Weak subsets (attribution, confidence 0.25)
+
+Recall of the pooled 249 annotations within each subset, as reported. The attribution radius is 15 px.
+
+| subset | n | recall@5px hits/n, 95% CI | recall@15px |
+|---|---:|---|---:|
+| merged_component | 38 | 0.395 (15/38, 0.256–0.553) | 0.395 |
+| has_trig_point | 38 | 0.974 (37/38, 0.865–0.995) | 0.974 |
+| blurred_or_bad_print | 55 | 0.909 (50/55, 0.804–0.961) | 0.909 |
+| crossed_by_contour | 69 | 1.000 (69/69, 0.947–1.000) | 1.000 |
+
+### End to end (confidence 0.25, frozen 512 decoder)
+
+Denominator is annotations with geometry. Missed follows the v0.5 rule: best IoU over candidates exactly 0 (amendment 2026-11-23). `fixed` and `detector` are the two box modes. Found-only mean IoU is as reported; found-only median IoU is computed as the median of the nonzero entries of `per_annotation_iou`, as in opening 1 (the nonzero count equals the reported found n and their mean equals the reported found mean, both asserted when this section was generated).
+
+| fold | arm | n | candidates | IoU>=0.5 hits/n, 95% CI | IoU>=0.75 hits/n, 95% CI | found n | found mean IoU | found median IoU | missed | missed rate | false masks | neutralized by ignore |
+|---|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|
+| foldA | fixed | 249 | 227 | 0.944 (235/249, 0.908–0.966) | 0.570 (142/249, 0.508–0.630) | 248 | 0.7458 | 0.7688 | 1 | 0.004 | 1 | 0 |
+| foldA | detector | 249 | 227 | 0.944 (235/249, 0.908–0.966) | 0.578 (144/249, 0.516–0.638) | 248 | 0.7456 | 0.7643 | 1 | 0.004 | 1 | 0 |
+| foldB | fixed | 249 | 227 | 0.944 (235/249, 0.908–0.966) | 0.671 (167/249, 0.610–0.726) | 248 | 0.7563 | 0.7838 | 1 | 0.004 | 1 | 0 |
+| foldB | detector | 249 | 227 | 0.944 (235/249, 0.908–0.966) | 0.679 (169/249, 0.618–0.734) | 248 | 0.7571 | 0.7831 | 1 | 0.004 | 1 | 0 |
+| foldC | fixed | 249 | 227 | 0.944 (235/249, 0.908–0.966) | 0.679 (169/249, 0.618–0.734) | 248 | 0.7554 | 0.7793 | 1 | 0.004 | 1 | 0 |
+| foldC | detector | 249 | 227 | 0.944 (235/249, 0.908–0.966) | 0.667 (166/249, 0.606–0.722) | 248 | 0.7554 | 0.7770 | 1 | 0.004 | 1 | 0 |
+
+Per sheet, end to end:
+
+| fold | arm | sheet | n | candidates | IoU>=0.5 | IoU>=0.75 | mean IoU | found mean IoU | missed | missed rate | false masks |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| foldA | fixed | K-35-22-A-v | 82 | 82 | 0.988 | 0.512 | 0.7465 | 0.7557 | 1 | 0.012 | 0 |
+| foldA | fixed | K-35-39-G-v | 98 | 99 | 1.000 | 0.571 | 0.7630 | 0.7630 | 0 | 0.000 | 1 |
+| foldA | fixed | K-35-39-V-g | 59 | 36 | 0.780 | 0.661 | 0.7008 | 0.7008 | 0 | 0.000 | 0 |
+| foldA | fixed | L-35-139-V-v † | 10 | 10 | 1.000 | 0.500 | 0.7626 | 0.7626 | 0 | 0.000 | 0 |
+| foldA | detector | K-35-22-A-v | 82 | 82 | 0.988 | 0.500 | 0.7405 | 0.7496 | 1 | 0.012 | 0 |
+| foldA | detector | K-35-39-G-v | 98 | 99 | 1.000 | 0.582 | 0.7640 | 0.7640 | 0 | 0.000 | 1 |
+| foldA | detector | K-35-39-V-g | 59 | 36 | 0.780 | 0.695 | 0.7065 | 0.7065 | 0 | 0.000 | 0 |
+| foldA | detector | L-35-139-V-v † | 10 | 10 | 1.000 | 0.500 | 0.7633 | 0.7633 | 0 | 0.000 | 0 |
+| foldB | fixed | K-35-22-A-v | 82 | 82 | 0.988 | 0.634 | 0.7561 | 0.7655 | 1 | 0.012 | 0 |
+| foldB | fixed | K-35-39-G-v | 98 | 99 | 1.000 | 0.735 | 0.7822 | 0.7822 | 0 | 0.000 | 1 |
+| foldB | fixed | K-35-39-V-g | 59 | 36 | 0.780 | 0.644 | 0.6970 | 0.6970 | 0 | 0.000 | 0 |
+| foldB | fixed | L-35-139-V-v † | 10 | 10 | 1.000 | 0.500 | 0.7790 | 0.7790 | 0 | 0.000 | 0 |
+| foldB | detector | K-35-22-A-v | 82 | 82 | 0.988 | 0.634 | 0.7528 | 0.7621 | 1 | 0.012 | 0 |
+| foldB | detector | K-35-39-G-v | 98 | 99 | 1.000 | 0.735 | 0.7828 | 0.7828 | 0 | 0.000 | 1 |
+| foldB | detector | K-35-39-V-g | 59 | 36 | 0.780 | 0.678 | 0.7045 | 0.7045 | 0 | 0.000 | 0 |
+| foldB | detector | L-35-139-V-v † | 10 | 10 | 1.000 | 0.500 | 0.7737 | 0.7737 | 0 | 0.000 | 0 |
+| foldC | fixed | K-35-22-A-v | 82 | 82 | 0.988 | 0.732 | 0.7668 | 0.7763 | 1 | 0.012 | 0 |
+| foldC | fixed | K-35-39-G-v | 98 | 99 | 1.000 | 0.684 | 0.7792 | 0.7792 | 0 | 0.000 | 1 |
+| foldC | fixed | K-35-39-V-g | 59 | 36 | 0.780 | 0.593 | 0.6840 | 0.6840 | 0 | 0.000 | 0 |
+| foldC | fixed | L-35-139-V-v † | 10 | 10 | 1.000 | 0.700 | 0.7754 | 0.7754 | 0 | 0.000 | 0 |
+| foldC | detector | K-35-22-A-v | 82 | 82 | 0.988 | 0.683 | 0.7618 | 0.7712 | 1 | 0.012 | 0 |
+| foldC | detector | K-35-39-G-v | 98 | 99 | 1.000 | 0.673 | 0.7798 | 0.7798 | 0 | 0.000 | 1 |
+| foldC | detector | K-35-39-V-g | 59 | 36 | 0.780 | 0.627 | 0.6907 | 0.6907 | 0 | 0.000 | 0 |
+| foldC | detector | L-35-139-V-v † | 10 | 10 | 1.000 | 0.700 | 0.7689 | 0.7689 | 0 | 0.000 | 0 |
+
+End-to-end macro over sheets (mean, min–max):
+
+| fold | arm | IoU>=0.5 | IoU>=0.75 | mean IoU | found mean IoU | missed rate |
+|---|---|---|---|---|---|---|
+| foldA | fixed | 0.942 (0.780–1.000) | 0.561 (0.500–0.661) | 0.743 (0.701–0.763) | 0.746 (0.701–0.763) | 0.003 (0.000–0.012) |
+| foldA | detector | 0.942 (0.780–1.000) | 0.569 (0.500–0.695) | 0.744 (0.707–0.764) | 0.746 (0.707–0.764) | 0.003 (0.000–0.012) |
+| foldB | fixed | 0.942 (0.780–1.000) | 0.628 (0.500–0.735) | 0.754 (0.697–0.782) | 0.756 (0.697–0.782) | 0.003 (0.000–0.012) |
+| foldB | detector | 0.942 (0.780–1.000) | 0.637 (0.500–0.735) | 0.753 (0.704–0.783) | 0.756 (0.704–0.783) | 0.003 (0.000–0.012) |
+| foldC | fixed | 0.942 (0.780–1.000) | 0.677 (0.593–0.732) | 0.751 (0.684–0.779) | 0.754 (0.684–0.779) | 0.003 (0.000–0.012) |
+| foldC | detector | 0.942 (0.780–1.000) | 0.671 (0.627–0.700) | 0.750 (0.691–0.780) | 0.753 (0.691–0.780) | 0.003 (0.000–0.012) |
+
+### Pre-registered paired comparison (recall@5px, confidence 0.25)
+
+This is the only comparative claim the protocol allows about the refit's detection recall (`TEST_PROTOCOL.md`, "Comparing the refit against the baseline"). Notation as defined there: R is the refit's pooled recall@5px, B<sub>max</sub> and B<sub>min</sub> the highest and lowest of the three baseline checkpoints, S = B<sub>max</sub> − B<sub>min</sub>. The discordant counts are mounds found by one detector and missed by the other; the p-value is the exact two-sided binomial (McNemar) value. Source: `paired.json`, `claim`.
+
+- Confidence 0.25, hit radius 5 px, 249 annotations, alpha 0.05
+- R = 0.9036 (225/249)
+- Baseline hits: foldA 198/249 (0.7952), foldB 200/249 (0.8032), foldC 204/249 (0.8193)
+- B<sub>max</sub> = 204 hits, B<sub>min</sub> = 198 hits, S = 6 hits (0.0241 in recall)
+- R − B<sub>max</sub> = 21 hits (S = 6)
+
+| baseline | refit only (found by refit, missed by baseline) | baseline only | both | neither | n | exact two-sided p |
+|---|---:|---:|---:|---:|---:|---:|
+| foldA | 29 | 2 | 196 | 22 | 249 | 4.629e-07 |
+| foldB | 28 | 3 | 197 | 21 | 249 | 4.649e-06 |
+| foldC | 22 | 1 | 203 | 23 | 249 | 5.722e-06 |
+
+Case: `improves`. Rule 1 holds: R > B<sub>max</sub> (225 > 204), p < 0.05 against all three checkpoints, and R − B<sub>max</sub> = 21 ≥ S = 6.
+
+Wording, verbatim from `paired.json`: **The refit improves recall.**
+
+The wording is exactly the string the protocol fixes for case 1 ("**The refit improves recall.**"), and no other comparative wording about the refit's detection recall is used in this document.
+
+### Descriptive paired comparisons
+
+Descriptive only, not a claim and not described as an effect of refitting (`TEST_PROTOCOL.md`: everything other than the claim above is descriptive). First = baseline, second = refit.
+
+Detector, recall@5px at confidence 0.05:
+
+| baseline | refit only | baseline only | both | neither | n | exact two-sided p |
+|---|---:|---:|---:|---:|---:|---:|
+| foldA | 21 | 2 | 204 | 22 | 249 | 6.604e-05 |
+| foldB | 21 | 3 | 204 | 21 | 249 | 2.772e-04 |
+| foldC | 18 | 1 | 207 | 23 | 249 | 7.629e-05 |
+
+End to end, paired per decoder (refit into decoder X against baseline fold X into decoder X):
+
+| fold | arm | metric | refit only | baseline only | both | neither | n | exact two-sided p |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| foldA | fixed | iou_0.5 | 20 | 0 | 215 | 14 | 249 | 1.907e-06 |
+| foldA | fixed | iou_0.75 | 15 | 7 | 127 | 100 | 249 | 1.338e-01 |
+| foldA | detector | iou_0.5 | 20 | 0 | 215 | 14 | 249 | 1.907e-06 |
+| foldA | detector | iou_0.75 | 23 | 8 | 121 | 97 | 249 | 1.067e-02 |
+| foldB | fixed | iou_0.5 | 20 | 0 | 215 | 14 | 249 | 1.907e-06 |
+| foldB | fixed | iou_0.75 | 23 | 6 | 144 | 76 | 249 | 2.316e-03 |
+| foldB | detector | iou_0.5 | 20 | 0 | 215 | 14 | 249 | 1.907e-06 |
+| foldB | detector | iou_0.75 | 26 | 8 | 143 | 72 | 249 | 2.935e-03 |
+| foldC | fixed | iou_0.5 | 16 | 0 | 219 | 14 | 249 | 3.052e-05 |
+| foldC | fixed | iou_0.75 | 22 | 8 | 147 | 72 | 249 | 1.612e-02 |
+| foldC | detector | iou_0.5 | 17 | 0 | 218 | 14 | 249 | 1.526e-05 |
+| foldC | detector | iou_0.75 | 25 | 9 | 141 | 74 | 249 | 9.041e-03 |
+
+### Side by side: opening 1 against opening 2
+
+Opening 1 rows are the three baseline folds (v0.5 detector fold X with decoder X); the opening 2 row is the refit detector (one detector; its end-to-end rows use decoder X). Detector columns at confidence 0.25.
+
+| run | recall@5px | recall@25px | precision | FP | FP/MP | p90 px |
+|---|---|---|---|---:|---:|---:|
+| opening 1 foldA | 0.795 (198/249, 0.741–0.841) | 0.803 | 0.985 | 3 | 0.0349 | 2.94 |
+| opening 1 foldB | 0.803 (200/249, 0.749–0.848) | 0.807 | 1.000 | 0 | 0.0000 | 2.82 |
+| opening 1 foldC | 0.819 (204/249, 0.767–0.862) | 0.827 | 0.954 | 10 | 0.1164 | 2.82 |
+| opening 2 refit | 0.904 (225/249, 0.861–0.934) | 0.904 | 0.991 | 2 | 0.0233 | 2.51 |
+
+Detector recall@5px at confidence 0.05:
+
+| run | recall@5px | precision | FP |
+|---|---|---|---:|
+| opening 1 foldA | 0.827 (206/249, 0.775–0.869) | 0.950 | 11 |
+| opening 1 foldB | 0.831 (207/249, 0.780–0.873) | 0.981 | 4 |
+| opening 1 foldC | 0.835 (208/249, 0.784–0.876) | 0.821 | 46 |
+| opening 2 refit | 0.904 (225/249, 0.861–0.934) | 0.957 | 10 |
+
+Recall@5px per sheet, confidence 0.25 (hits/n):
+
+| run | K-35-22-A-v | K-35-39-G-v | K-35-39-V-g | L-35-139-V-v |
+|---|---:|---:|---:|---:|
+| opening 1 foldA | 0.866 (71/82) | 0.929 (91/98) | 0.458 (27/59) | 0.900 (9/10) |
+| opening 1 foldB | 0.854 (70/82) | 0.969 (95/98) | 0.424 (25/59) | 1.000 (10/10) |
+| opening 1 foldC | 0.829 (68/82) | 0.990 (97/98) | 0.492 (29/59) | 1.000 (10/10) |
+| opening 2 refit | 0.988 (81/82) | 1.000 (98/98) | 0.610 (36/59) | 1.000 (10/10) |
+
+End to end, `fixed` arm, IoU>=0.5 / IoU>=0.75 / found mean IoU / missed / false masks:
+
+| fold | opening 1 | opening 2 |
+|---|---|---|
+| foldA | 0.863 / 0.538 / 0.7507 / 25 / 3 | 0.944 / 0.570 / 0.7458 / 1 / 1 |
+| foldB | 0.863 / 0.602 / 0.7611 / 25 / 0 | 0.944 / 0.671 / 0.7563 / 1 / 1 |
+| foldC | 0.880 / 0.622 / 0.7582 / 20 / 10 | 0.944 / 0.679 / 0.7554 / 1 / 1 |
+
+Same, `detector` arm:
+
+| fold | opening 1 | opening 2 |
+|---|---|---|
+| foldA | 0.863 / 0.518 / 0.7485 / 25 / 3 | 0.944 / 0.578 / 0.7456 / 1 / 1 |
+| foldB | 0.863 / 0.606 / 0.7659 / 25 / 0 | 0.944 / 0.679 / 0.7571 / 1 / 1 |
+| foldC | 0.876 / 0.602 / 0.7612 / 20 / 10 | 0.944 / 0.667 / 0.7554 / 1 / 1 |
+
+### Observations
+
+Facts only, read off the tables above; no causes are asserted.
+
+- Pooled recall@5px at confidence 0.25 is 0.904 (225/249) for the refit, against 0.795, 0.803 and 0.819 (198, 200, 204 of 249) for the three baseline folds. Recall is the same at 5, 10, 15 and 25 px. Precision is 0.991 with 2 false positives, both background (one on K-35-22-A-v, one on K-35-39-G-v).
+- 24 of the 249 annotations are not hit within 5 px at 0.25. By sheet: 23 on K-35-39-V-g (36 of 59 hit), 1 on K-35-22-A-v (81 of 82), none on K-35-39-G-v or L-35-139-V-v.
+- K-35-39-V-g, the hardest sheet on every baseline fold (recall@5px 0.458, 0.424, 0.492), is also the hardest for the refit (0.610). The refit returns 36 candidates for its 59 annotations (baseline 28, 25, 36), none of them false.
+- By subset, `merged_component` has the lowest recall@5px (0.395, 15/38), the same value as baseline folds B and C (0.395) and above fold A (0.368). `has_trig_point` is 0.974 (37/38), against 0.579 to 0.632 on the baseline folds. `crossed_by_contour` is 1.000 (69/69).
+- Lowering the confidence from 0.25 to 0.05 adds 8 candidates and 8 false positives and no hit at the refit (recall@5px 0.904 at both).
+- End-to-end IoU>=0.5 is 0.944 (235/249) on all three decoders and both arms; IoU>=0.75 is 0.570 to 0.679. One annotation is missed (best IoU exactly 0) on every decoder, against 25, 25 and 20 at baseline. Found-only mean IoU is 0.7458, 0.7563 and 0.7554 (`fixed`), against 0.7507, 0.7611 and 0.7582 at baseline: the found-only mean is not higher on any decoder, while IoU>=0.5 and the number of annotations counted as found (248 against 224 to 229) are higher.
+- The end-to-end "missed" definition (best IoU over candidates exactly 0) differs from the detector's 5 px hit, so K-35-39-V-g shows 0 missed end to end while 23 of its annotations are not hit at 5 px; its end-to-end IoU>=0.5 is 0.780.
+- The end-to-end paired comparison at IoU>=0.5 has no annotation that the baseline scored and the refit did not (baseline only 0) on any decoder or arm. At IoU>=0.75 the discordance runs both ways (baseline only 6 to 9; refit only 15 to 26). These are descriptive.
+- No candidate was neutralized by an ignore region (0, detector and end to end). L-35-139-V-v has 10 annotations, so its rates carry wide intervals.
+
+### Validation-selection bias and the blind test
+
+The refit checkpoint (`epoch125.pt`) was chosen on 12 validation sheets whose labels come from a model-assisted review: it started from v0.5 proposals and was not blind, although the review was thorough and included a deliberate search for missed mounds. The `human_added` share on those sheets is 11/308 (0.0357; see "Before opening 2"). The protocol records that selection on them may slightly favour checkpoints that behave like v0.5. The frozen test set was annotated blind and has now been opened twice, so it served as the judge for both the baseline and the refit; no checkpoint, threshold or radius was chosen on it.
