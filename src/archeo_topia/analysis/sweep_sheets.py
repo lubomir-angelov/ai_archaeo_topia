@@ -2,8 +2,8 @@
 """Run the detector over whole map sheets that have no ground truth (v0.6 step 1).
 
 Every detection path in the project so far has been bound to a *labelled*
-dataset: ``train_mound_detector.predict_fold`` reads a fold's ``_val.txt`` and
-``mapsam_end_to_end`` reads ``metadata/windows.jsonl`` plus a ground-truth COCO.
+dataset: ``train_mound_detector.predict_windows`` reads a listing such as a
+fold's ``_val.txt`` and ``mapsam_end_to_end`` reads ``metadata/windows.jsonl`` plus a ground-truth COCO.
 Sweeping 56 newly acquired sheets needs neither, so this module tiles a raster
 directly and runs the detector over it.
 
@@ -56,7 +56,7 @@ Image.MAX_IMAGE_PIXELS = None
 #: Confidence operating points reported for every sheet.
 THRESHOLDS = (0.05, 0.10, 0.25)
 
-#: Windows per inference call. Matches ``predict_fold``.
+#: Windows per inference call. Matches ``predict_windows``.
 BATCH = 32
 
 
@@ -151,7 +151,9 @@ def discover(source: Path) -> list[Path]:
     found = [p for p in everything if "_frozen" not in p.parts]
     skipped = len(everything) - len(found)
     if skipped:
-        logger.warning("skipping %d raster(s) under _frozen/ — reserved for blind annotation", skipped)
+        logger.warning(
+            "skipping %d raster(s) under _frozen/ — reserved for blind annotation", skipped
+        )
     return found
 
 
@@ -279,9 +281,7 @@ def sweep(
     return merged, raw, stats
 
 
-def write_candidates(
-    path: Path, sheet: SheetSource, candidates: list[Detection]
-) -> None:
+def write_candidates(path: Path, sheet: SheetSource, candidates: list[Detection]) -> None:
     """Write one sheet's candidates as JSON lines.
 
     Args:
@@ -391,9 +391,7 @@ def main() -> None:
             stats["weights"] = str(weights_path)
             rows.append(stats)
             write_candidates(run_dir / sheet.sheet_id / "candidates.jsonl", sheet, candidates)
-            render_crops(
-                run_dir / sheet.sheet_id / "crops", sheet, candidates, args.render_crops
-            )
+            render_crops(run_dir / sheet.sheet_id / "crops", sheet, candidates, args.render_crops)
             logger.info(
                 "[%s] %d/%d %s: %d windows (%d dropped), %d candidates, %.2f/Mpx at 0.25",
                 label,

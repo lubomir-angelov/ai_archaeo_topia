@@ -12,9 +12,9 @@ worth stating where the code lives:
 * **One class.** ``hard_negative_symbol`` is *not* a second class. The 530
   negatives teach the detector by appearing in windows that carry no target —
   270 of the 480 windows contain a hard negative and no mound, so the negatives
-  arrive as background from tiling alone. Their boxes are still written to the
-  window metadata so a false positive can be attributed to a ``negative_type``
-  at evaluation time.
+  arrive as background from tiling alone. Their boxes are still written to
+  ``metadata/regions.jsonl`` so a false positive can be attributed to a
+  ``negative_type`` at evaluation time.
 * **Targets are annotations, not mask components.** Eight pairs of touching
   mounds share a connected component, so the segmentation manifest holds 171
   samples for 180 annotations. Detection recall is measured against the
@@ -22,33 +22,48 @@ worth stating where the code lives:
   recorded rather than applied.
 * **``uncertain_ignore`` is excluded in both directions.** It is not a target,
   and a detection landing on one is neither a true nor a false positive. The
-  regions are written to the window metadata so evaluation can neutralize them.
+  regions are written to ``metadata/regions.jsonl`` so evaluation can
+  neutralize them.
 
-Windows are written once and shared between folds; each fold is a pair of
-newline-delimited image lists plus an Ultralytics data YAML pointing at them.
-That keeps three leave-one-sheet-out folds from triplicating the crops on disk.
+Regions are recorded once, from the COCO box, in source coordinates. Window
+records carry no regions: a region that crosses a window edge would otherwise
+be stored as several clipped fragments and reconstructed from whichever window
+was read last.
+
+Windows are written once and shared between listings. ``--listing`` declares
+what the build is for and is required: ``loso`` writes the three
+leave-one-sheet-out folds (image lists plus an Ultralytics data YAML each, so
+the crops are not triplicated on disk); ``test`` writes only ``test.txt`` for
+the frozen blind sheets and no training split at all. Every guard runs before
+any file is written.
 
 Usage:
     python -m archeo_topia.datasets.build_detection_windows \\
-        --coco-json annotation/cvat/v0.0.1/instances_default.json \\
+        --coco-json annotation/cvat/v0.0.2/instances_default.json \\
         --images-root data/curated/datasets/mapsam_v02/images \\
-        --output-dir data/curated/datasets/mapsam_det_v0 \\
+        --schema annotation/cvat/labels.json --listing loso \\
+        --output-dir data/curated/datasets/mapsam_det_v1_c3 \\
         --window 512 --stride 384
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple, get_args
 
 import numpy as np
 from PIL import Image
 
+from archeo_topia.analysis.runtime import new_directory
 from archeo_topia.formats.coco import decode_mask as _decode_mask
+from archeo_topia.formats.georeference import SheetReference
+from archeo_topia.formats.labels import LabelSchema
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +71,25 @@ MOUND = "mound"
 HARD_NEGATIVE = "hard_negative_symbol"
 UNCERTAIN = "uncertain_ignore"
 
+#: Repository root. Anything recorded relative to it carries no host path.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
 #: Splits declared by 1:100k parent sheet. Written by v0.6; see the file's own
 #: ``rationale`` for why the grouping is by parent and not by 1:25k sheet id.
-SPLITS_FILE = Path(__file__).resolve().parents[3] / "configs" / "splits" / "v0_6_splits.json"
+SPLITS_FILE = REPO_ROOT / "configs" / "splits" / "v0_6_splits.json"
+
+#: What a build is for. ``loso`` is the v0.1-v0.5 leave-one-sheet-out folds;
+#: ``test`` is the frozen blind test sheets, scored and never trained on.
+ListingPlan = Literal["loso", "test"]
+LISTING_PLANS: tuple[str, ...] = get_args(ListingPlan)
+
+#: Kinds of source-coordinate region written to ``regions.jsonl``.
+RegionKind = Literal["hard_negative_symbol", "uncertain_ignore"]
+
+#: Decimal places of every box written to the dataset metadata. Rounding exists
+#: only to keep float noise out of the records and of the box-difference listing
+#: of the C1 reproduction; scoring that must match v0.5 never sees it.
+REGION_BOX_DECIMALS = 2
 
 #: Preset name for the leave-one-sheet-out folds of v0.1-v0.5.
 LOSO_PRESET = "loso_v0_5"
@@ -92,14 +123,17 @@ def load_folds(preset: str = LOSO_PRESET, splits_file: Path | None = None) -> di
     return dict(presets[preset]["folds"])
 
 
-def load_splits(splits_file: Path | None = None) -> dict[str, list[str]]:
-    """Load the permanent train / validation / test split.
+def load_split_document(splits_file: Path | None = None) -> dict[str, Any]:
+    """Load the whole splits document.
+
+    Args:
+        splits_file: Override for the splits file location.
 
     Returns:
-        Mapping of split name to sheet ids.
+        The parsed document, with ``version``, ``splits`` and ``sheets``.
     """
     path = splits_file or SPLITS_FILE
-    return dict(json.loads(path.read_text(encoding="utf-8"))["splits"])
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 #: Leave-one-sheet-out folds, identical to the v0.4 MapSAM configs so detection
@@ -319,15 +353,183 @@ def find_image(images_root: Path, file_name: str) -> Path:
     raise FileNotFoundError(f"{file_name} not found under {images_root}")
 
 
+def crop_path(dataset: Path, window_id: str) -> Path:
+    """Return where a window's crop lives inside a dataset.
+
+    Args:
+        dataset: Dataset root.
+        window_id: Window id.
+
+    Returns:
+        ``<dataset>/images/<window_id>.png``.
+    """
+    return dataset / "images" / f"{window_id}.png"
+
+
+def listing_entry(window_id: str) -> str:
+    """Return the line a listing file holds for a window.
+
+    Args:
+        window_id: Window id.
+
+    Returns:
+        ``./images/<window_id>.png``.
+    """
+    return f"./images/{window_id}.png"
+
+
+def repo_relative(path: Path) -> str:
+    """Return a path relative to the repository when it lies inside it.
+
+    Args:
+        path: A path, absolute or relative.
+
+    Returns:
+        The repository-relative POSIX path, or the path as given when it is
+        outside the repository.
+    """
+    try:
+        return path.resolve().relative_to(REPO_ROOT).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def validate_export(
+    coco: dict[str, Any],
+    schema_path: Path,
+    images_root: Path,
+    clips_json_paths: Sequence[Path] | None,
+) -> None:
+    """Check a COCO export before anything is built from it.
+
+    Every violation is collected and raised together, so one run shows the
+    whole list.
+
+    Args:
+        coco: Parsed CVAT COCO export.
+        schema_path: Annotation schema (``labels.json``) the categories must
+            belong to.
+        images_root: Root of the clip images.
+        clips_json_paths: ``clips.json`` manifests that the export must match
+            clip for clip, or None when there are none to match.
+
+    Raises:
+        ValueError: Listing every violation.
+    """
+    problems: list[str] = []
+
+    declared = set(LabelSchema.load(schema_path).label_names)
+    unknown = sorted({c["name"] for c in coco["categories"]} - declared)
+    if unknown:
+        problems.append(f"categories not in {schema_path}: {unknown}")
+    category_ids = {c["id"] for c in coco["categories"]}
+
+    for image in coco["images"]:
+        try:
+            path = find_image(images_root, image["file_name"])
+        except FileNotFoundError as error:
+            problems.append(str(error))
+            continue
+        with Image.open(path) as handle:
+            size = handle.size
+        if size != (image["width"], image["height"]):
+            problems.append(
+                f"{image['file_name']}: COCO says {image['width']}x{image['height']}, "
+                f"the PNG is {size[0]}x{size[1]}"
+            )
+
+    names = {i["id"]: i["file_name"] for i in coco["images"]}
+    seen: set[tuple[str, int]] = set()
+    for ann in coco["annotations"]:
+        if ann["image_id"] not in names:
+            problems.append(f"annotation {ann['id']} names unknown image id {ann['image_id']}")
+            continue
+        if ann["category_id"] not in category_ids:
+            problems.append(
+                f"annotation {ann['id']} names unknown category id {ann['category_id']}"
+            )
+        identity = (names[ann["image_id"]], ann["id"])
+        if identity in seen:
+            problems.append(f"annotation identity {identity} is not unique")
+        seen.add(identity)
+
+    if clips_json_paths is not None:
+        export_files = set(names.values())
+        named_by_clips: set[str] = set()
+        for path in clips_json_paths:
+            clips = {clip.file for clip in SheetReference.from_clips_json(path).clips}
+            if not clips:
+                problems.append(f"{path} names no clips")
+            absent = sorted(clips - export_files)
+            if absent:
+                problems.append(f"{path} names clips missing from the export: {absent}")
+            named_by_clips |= clips
+        unnamed = sorted(export_files - named_by_clips)
+        if unnamed:
+            problems.append(f"export images named by no clips.json: {unnamed}")
+
+    if problems:
+        raise ValueError("invalid COCO export:\n  " + "\n  ".join(problems))
+
+
+def validate_listing_sheets(
+    plan: str,
+    sheets: set[str],
+    splits_document: dict[str, Any],
+    folds: dict[str, str] | None,
+) -> None:
+    """Check that the exported sheets are the ones the listing plan allows.
+
+    Args:
+        plan: Listing plan.
+        sheets: Sheets present in the export.
+        splits_document: Parsed splits file.
+        folds: The ``loso`` fold preset (fold name to eval sheet) for the
+            ``loso`` plan, None otherwise.
+
+    Raises:
+        ValueError: Listing every violation, or on an unknown plan.
+    """
+    problems: list[str] = []
+    if plan == "loso":
+        if folds is None:
+            raise ValueError("the loso plan needs the fold preset")
+        fold_sheets = set(folds.values())
+        if sheets - fold_sheets:
+            problems.append(
+                f"exported sheets outside preset {LOSO_PRESET}: {sorted(sheets - fold_sheets)}"
+            )
+        if fold_sheets - sheets:
+            problems.append(
+                f"preset {LOSO_PRESET} sheets not exported: {sorted(fold_sheets - sheets)}"
+            )
+    elif plan == "test":
+        test = set(splits_document["splits"]["test"])
+        frozen = {
+            sheet for sheet, meta in splits_document["sheets"].items() if meta["frozen_blind_test"]
+        }
+        if sheets - test:
+            problems.append(f"exported sheets not in the test split: {sorted(sheets - test)}")
+        if sheets - frozen:
+            problems.append(f"exported sheets not frozen blind test: {sorted(sheets - frozen)}")
+    else:
+        raise ValueError(f"unknown listing plan {plan!r}; have {list(LISTING_PLANS)}")
+    if problems:
+        raise ValueError(f"listing plan {plan!r} refuses this export:\n  " + "\n  ".join(problems))
+
+
 def build(
     coco_json: Path,
     images_root: Path,
     output_dir: Path,
     window_size: int,
     stride: int,
-    write_images: bool = True,
+    schema_path: Path,
+    plan: str,
+    clips_json_paths: Sequence[Path] | None,
+    splits_file: Path = SPLITS_FILE,
 ) -> dict[str, Any]:
-    """Tile every annotated clip and write a fold-shared detection dataset.
+    """Tile every annotated clip and write a listing-shared detection dataset.
 
     Args:
         coco_json: CVAT COCO export.
@@ -335,14 +537,37 @@ def build(
         output_dir: Destination directory.
         window_size: Window side length in source pixels.
         stride: Step between window origins.
-        write_images: Write the crops. Set false to refresh labels and
-            metadata without re-encoding the PNGs.
+        schema_path: Annotation schema the export's categories must belong to.
+        plan: What the build is for, ``loso`` or ``test``.
+        clips_json_paths: ``clips.json`` manifests. Required for ``test``,
+            rejected for ``loso``.
+        splits_file: Splits file declaring the sheets of each plan.
 
     Returns:
         A build report dict, also written to ``metadata/build_report.json``.
+
+    Raises:
+        ValueError: If the plan, the clips manifests or the export are
+            inconsistent. Nothing is written in that case.
+        FileExistsError: If ``output_dir`` already exists; a dataset is built
+            once, so a stale listing can never be scored as a fresh one.
     """
+    if plan not in LISTING_PLANS:
+        raise ValueError(f"unknown listing plan {plan!r}; have {list(LISTING_PLANS)}")
+    if plan == "test" and not clips_json_paths:
+        raise ValueError("the test plan requires --clips-json")
+    if plan == "loso" and clips_json_paths:
+        raise ValueError("the loso plan takes no --clips-json")
+
     with open(coco_json, encoding="utf-8") as handle:
         coco = json.load(handle)
+
+    validate_export(coco, schema_path, images_root, clips_json_paths)
+    splits_document = load_split_document(splits_file)
+    folds = load_folds(splits_file=splits_file) if plan == "loso" else None
+    validate_listing_sheets(
+        plan, {sheet_of(i["file_name"]) for i in coco["images"]}, splits_document, folds
+    )
 
     categories = {c["id"]: c["name"] for c in coco["categories"]}
     images = {i["id"]: i for i in coco["images"]}
@@ -351,12 +576,14 @@ def build(
     for ann in coco["annotations"]:
         by_image[ann["image_id"]][categories[ann["category_id"]]].append(ann)
 
-    (output_dir / "images").mkdir(parents=True, exist_ok=True)
-    (output_dir / "labels").mkdir(parents=True, exist_ok=True)
-    (output_dir / "metadata").mkdir(parents=True, exist_ok=True)
+    new_directory(output_dir)
+    for sub in ("images", "labels", "metadata"):
+        (output_dir / sub).mkdir()
 
     window_records: list[dict[str, Any]] = []
     annotation_records: list[dict[str, Any]] = []
+    region_records: list[dict[str, Any]] = []
+    source_hashes: dict[str, str] = {}
     by_sheet_windows: dict[str, list[str]] = defaultdict(list)
     counts = {
         "windows_total": 0,
@@ -381,6 +608,27 @@ def build(
         ignores = by_image[image_id][UNCERTAIN]
         counts["mound_annotations"] += len(mounds)
 
+        # Regions are recorded once, whole, from the COCO box -- never per window.
+        for kind, items in ((HARD_NEGATIVE, negatives), (UNCERTAIN, ignores)):
+            for region in items:
+                rx, ry, rw, rh = region["bbox"]
+                region_records.append(
+                    {
+                        "kind": kind,
+                        "annotation_id": region["id"],
+                        "sheet_id": sheet,
+                        "source_image": file_name,
+                        "bbox_source_xyxy": [
+                            round(v, REGION_BOX_DECIMALS) for v in (rx, ry, rx + rw, ry + rh)
+                        ],
+                        "negative_type": (
+                            region["attributes"]["negative_type"]
+                            if kind == HARD_NEGATIVE
+                            else None
+                        ),
+                    }
+                )
+
         groups = component_groups(mounds, width, height)
         component_of = {
             ann_id: (label, len(members))
@@ -389,7 +637,9 @@ def build(
         }
         counts["merged_components"] += sum(1 for m in groups.values() if len(m) > 1)
 
-        source = Image.open(find_image(images_root, file_name)).convert("RGB")
+        source_path = find_image(images_root, file_name)
+        source_hashes[file_name] = sha256_file(source_path)
+        source = Image.open(source_path).convert("RGB")
         windows = plan_windows(width, height, window_size, stride)
 
         # Per annotation: which windows see it, and does any window hold it
@@ -414,34 +664,20 @@ def build(
                 targets.append(
                     {
                         "annotation_id": ann["id"],
-                        "box_window_xyxy": [round(v, 2) for v in box],
+                        "box_window_xyxy": [round(v, REGION_BOX_DECIMALS) for v in box],
                         "visible_fraction": round(visible, 4),
                         "truncated": visible < 0.999,
                     }
                 )
 
-            negatives_in = [
-                {
-                    "annotation_id": n["id"],
-                    "negative_type": (n.get("attributes") or {}).get("negative_type"),
-                    "box_window_xyxy": [round(v, 2) for v in clip_box(n["bbox"], window)[0]],
-                }
-                for n in negatives
-                if window.x0 <= n["bbox"][0] + n["bbox"][2] / 2 < window.x1
+            has_negative = any(
+                window.x0 <= n["bbox"][0] + n["bbox"][2] / 2 < window.x1
                 and window.y0 <= n["bbox"][1] + n["bbox"][3] / 2 < window.y1
-            ]
-            ignores_in = [
-                {
-                    "annotation_id": g["id"],
-                    "box_window_xyxy": [round(v, 2) for v in clip_box(g["bbox"], window)[0]],
-                }
-                for g in ignores
-                if clip_box(g["bbox"], window)[1] > 0
-            ]
+                for n in negatives
+            )
 
-            if write_images:
-                crop = source.crop((window.x0, window.y0, window.x1, window.y1))
-                crop.save(output_dir / "images" / f"{window_stem}.png")
+            crop = source.crop((window.x0, window.y0, window.x1, window.y1))
+            crop.save(crop_path(output_dir, window_stem))
 
             label_path = output_dir / "labels" / f"{window_stem}.txt"
             lines = [
@@ -453,7 +689,7 @@ def build(
             counts["windows_total"] += 1
             if targets:
                 counts["windows_with_mound"] += 1
-            elif negatives_in:
+            elif has_negative:
                 counts["windows_hard_negative_only"] += 1
             else:
                 counts["windows_empty"] += 1
@@ -468,8 +704,6 @@ def build(
                     # Inverse transform: source = window + [x0, y0].
                     "window_xyxy": [window.x0, window.y0, window.x1, window.y1],
                     "targets": targets,
-                    "hard_negatives": negatives_in,
-                    "uncertain_ignore": ignores_in,
                 }
             )
 
@@ -497,9 +731,19 @@ def build(
                 }
             )
 
-    _write_jsonl(output_dir / "metadata" / "windows.jsonl", window_records)
-    _write_jsonl(output_dir / "metadata" / "annotations.jsonl", annotation_records)
-    _write_folds(output_dir, by_sheet_windows)
+    metadata = output_dir / "metadata"
+    _write_jsonl(metadata / "windows.jsonl", window_records)
+    _write_jsonl(metadata / "annotations.jsonl", annotation_records)
+    _write_jsonl(metadata / "regions.jsonl", region_records)
+    listing = _write_listings(output_dir, plan, by_sheet_windows, folds)
+
+    outputs = {
+        f"metadata/{name}.jsonl": sha256_file(metadata / f"{name}.jsonl")
+        for name in ("windows", "annotations", "regions")
+    }
+    for entry in listing["listings"].values():
+        outputs[entry["file"]] = sha256_file(output_dir / entry["file"])
+    outputs["crops"] = crops_digest(output_dir, [w["window_id"] for w in window_records])
 
     report = {
         "window_size": window_size,
@@ -507,14 +751,60 @@ def build(
         "counts": counts,
         "windows_per_sheet": {s: len(v) for s, v in by_sheet_windows.items()},
         "mounds_per_sheet": _tally(annotation_records, "sheet_id"),
-        "folds": {
-            name: {"eval_sheet": sheet, "train_sheets": [s for s in FOLDS.values() if s != sheet]}
-            for name, sheet in FOLDS.items()
+        "inputs": {
+            "coco_json": repo_relative(coco_json),
+            "schema": repo_relative(schema_path),
+            "source_images_sha256": source_hashes,
+            "clips_json_sha256": {
+                SheetReference.from_clips_json(p).sheet_id: sha256_file(p)
+                for p in clips_json_paths or ()
+            },
+            "splits_file": repo_relative(splits_file),
+            "splits_version": splits_document["version"],
         },
+        "listing": listing,
+        "regions": {
+            kind: sum(1 for r in region_records if r["kind"] == kind)
+            for kind in get_args(RegionKind)
+        },
+        "outputs_sha256": outputs,
     }
-    with open(output_dir / "metadata" / "build_report.json", "w", encoding="utf-8") as handle:
+    with open(metadata / "build_report.json", "w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2)
     return report
+
+
+def sha256_file(path: Path) -> str:
+    """Return the sha256 of a file, streamed.
+
+    Args:
+        path: File to hash.
+
+    Returns:
+        Lowercase hex digest.
+    """
+    with open(path, "rb") as handle:
+        return hashlib.file_digest(handle, "sha256").hexdigest()
+
+
+def crops_digest(output_dir: Path, window_ids: Sequence[str]) -> str:
+    """Return the sha256 of ``"<window id> <sha256 of its PNG>\\n"`` per window.
+
+    Windows are taken in sorted id order, so the digest does not depend on how
+    the build enumerated them.
+
+    Args:
+        output_dir: Dataset root.
+        window_ids: Every window of the build.
+
+    Returns:
+        Lowercase hex digest.
+    """
+    digest = hashlib.sha256()
+    for window_id in sorted(window_ids):
+        png = sha256_file(crop_path(output_dir, window_id))
+        digest.update(f"{window_id} {png}\n".encode())
+    return digest.hexdigest()
 
 
 def _tally(records: list[dict[str, Any]], key: str) -> dict[str, int]:
@@ -545,39 +835,80 @@ def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(record) + "\n")
 
 
-def _write_folds(output_dir: Path, by_sheet: dict[str, list[str]]) -> None:
-    """Write per-fold image lists and Ultralytics data YAMLs.
+def _write_listing(
+    output_dir: Path, name: str, sheets: list[str], by_sheet: dict[str, list[str]]
+) -> dict[str, Any]:
+    """Write one image list and describe it.
+
+    Args:
+        output_dir: Dataset root.
+        name: Listing name; the file is ``<name>.txt``.
+        sheets: Sheets the list covers.
+        by_sheet: Window ids grouped by sheet.
+
+    Returns:
+        The listing's entry for the build report.
+    """
+    lines = [listing_entry(window_id) for sheet in sheets for window_id in by_sheet[sheet]]
+    (output_dir / f"{name}.txt").write_text("\n".join(sorted(lines)) + "\n", encoding="utf-8")
+    return {"file": f"{name}.txt", "sheets": sheets, "windows": len(lines)}
+
+
+def _write_listings(
+    output_dir: Path,
+    plan: str,
+    by_sheet: dict[str, list[str]],
+    folds: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Write the image lists the plan calls for.
 
     The lists live at the dataset root rather than in a subdirectory:
     Ultralytics resolves a ``./`` path inside an image list against the list
     file's own parent, so a list in ``splits/`` would look for the crops under
     ``splits/images/`` and find no labels.
 
+    ``loso`` writes per-fold train and val lists plus a data YAML each. ``test``
+    writes ``test.txt`` only: no YAML, no train list, no fold files.
+
     Args:
         output_dir: Dataset root.
+        plan: ``loso`` or ``test``.
         by_sheet: Window ids grouped by sheet.
+        folds: Fold name to held-out sheet, for ``loso``.
+
+    Returns:
+        The ``listing`` block of the build report.
     """
-    for fold, eval_sheet in FOLDS.items():
-        for split, sheets in (
-            ("train", [s for s in by_sheet if s != eval_sheet]),
-            ("val", [eval_sheet]),
-        ):
-            lines = [
-                f"./images/{window_id}.png" for sheet in sheets for window_id in by_sheet[sheet]
-            ]
-            (output_dir / f"{fold}_{split}.txt").write_text(
-                "\n".join(sorted(lines)) + "\n", encoding="utf-8"
+    listings: dict[str, Any] = {}
+    if plan == "loso":
+        if folds is None:
+            raise ValueError("the loso plan needs the fold preset")
+        for fold, eval_sheet in folds.items():
+            for split, sheets in (
+                ("train", [s for s in by_sheet if s != eval_sheet]),
+                ("val", [eval_sheet]),
+            ):
+                listings[f"{fold}_{split}"] = _write_listing(
+                    output_dir, f"{fold}_{split}", sheets, by_sheet
+                )
+            (output_dir / f"{fold}.yaml").write_text(
+                "# Leave-one-sheet-out fold for MapSAM v0.5 mound detection.\n"
+                f"# Evaluation sheet: {eval_sheet}\n"
+                f"path: {output_dir.resolve()}\n"
+                f"train: {fold}_train.txt\n"
+                f"val: {fold}_val.txt\n"
+                "names:\n"
+                "  0: mound\n",
+                encoding="utf-8",
             )
-        (output_dir / f"{fold}.yaml").write_text(
-            "# Leave-one-sheet-out fold for MapSAM v0.5 mound detection.\n"
-            f"# Evaluation sheet: {eval_sheet}\n"
-            f"path: {output_dir.resolve()}\n"
-            f"train: {fold}_train.txt\n"
-            f"val: {fold}_val.txt\n"
-            "names:\n"
-            "  0: mound\n",
-            encoding="utf-8",
-        )
+        fold_block: dict[str, Any] | None = {
+            name: {"eval_sheet": sheet, "train_sheets": [s for s in folds.values() if s != sheet]}
+            for name, sheet in folds.items()
+        }
+    else:
+        listings["test"] = _write_listing(output_dir, "test", sorted(by_sheet), by_sheet)
+        fold_block = None
+    return {"plan": plan, "listings": listings, "folds": fold_block}
 
 
 def main() -> None:
@@ -585,14 +916,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--coco-json", type=Path, required=True)
     parser.add_argument("--images-root", type=Path, required=True)
+    parser.add_argument("--schema", type=Path, required=True)
+    parser.add_argument("--listing", choices=LISTING_PLANS, required=True)
+    parser.add_argument("--clips-json", type=Path, action="append", default=None)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--window", type=int, default=512)
     parser.add_argument("--stride", type=int, default=384)
-    parser.add_argument(
-        "--labels-only",
-        action="store_true",
-        help="Refresh labels and metadata without re-encoding the crops",
-    )
     parser.add_argument("--log-level", default="INFO")
     args = parser.parse_args()
 
@@ -603,7 +932,9 @@ def main() -> None:
         output_dir=args.output_dir,
         window_size=args.window,
         stride=args.stride,
-        write_images=not args.labels_only,
+        schema_path=args.schema,
+        plan=args.listing,
+        clips_json_paths=args.clips_json,
     )
     print(json.dumps(report, indent=2))
 

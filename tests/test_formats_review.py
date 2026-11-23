@@ -86,17 +86,19 @@ class TestVerdicts:
         )
         report = check(returned, original)
         assert report.counts[ADDED] == 1
-        assert report.recall_floor == pytest.approx(4 / 5)
+        assert report.recall_model_assisted == pytest.approx(4 / 5)
 
-    def test_recall_is_reported_as_a_floor(self) -> None:
-        """Reviewers see proposals, so they do not search exhaustively."""
+    def test_recall_is_reported_as_model_assisted(self) -> None:
+        """Reviewers search each sheet, but start from model proposals."""
         original = delivered()
         returned = copy.deepcopy(original)
         for feature in returned.features:
             feature.properties[REVIEW_STATUS] = CONFIRMED
         report = check(returned, original)
-        assert "floor" in report.as_dict()["scope"]
-        assert "frozen blind test" in report.as_dict()["scope"]
+        scope = report.as_dict()["scope"]
+        assert "floor" not in scope
+        assert "model-assisted" in scope
+        assert "frozen blind test" in scope
 
 
 class TestIntegrity:
@@ -227,7 +229,9 @@ class TestToCoco:
         schema = LabelSchema.load("annotation/cvat/labels.json")
         allowed = set(schema.attribute("hard_negative_symbol", PROVENANCE)["values"])
         assert set(PROVENANCE_BY_VERDICT.values()) <= allowed
-        assert UNTYPED_NEGATIVE in schema.attribute("hard_negative_symbol", NEGATIVE_TYPE)["values"]
+        assert (
+            UNTYPED_NEGATIVE in schema.attribute("hard_negative_symbol", NEGATIVE_TYPE)["values"]
+        )
 
     def test_negatives_can_be_switched_off(self, tmp_path: Path) -> None:
         """The pre-v0.6 behaviour stays reachable, for reproducing old output."""
@@ -292,4 +296,4 @@ class TestThroughRealFiles:
         assert report.sound, report.problems
         assert report.counts == {ADDED: 1, CONFIRMED: 2, CORRECTED: 1, REJECTED: 1}
         assert report.precision == pytest.approx(0.75)
-        assert report.recall_floor == pytest.approx(0.75)
+        assert report.recall_model_assisted == pytest.approx(0.75)

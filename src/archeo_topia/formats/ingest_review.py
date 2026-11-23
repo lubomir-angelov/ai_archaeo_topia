@@ -14,10 +14,12 @@ marked ``unreviewed``.
 
 **What the resulting numbers mean, and do not.** Reviewers see model proposals,
 so the result measures **precision** well: every proposal has a verdict.
-Recall is bounded only over what a reviewer independently noticed and added,
-which is not the same as an exhaustive search, so it is reported as a floor and
-labelled as one. This is field verification, not the frozen blind test, and it
-cannot substitute for it.
+Reviewers also searched each sheet for mounds the model missed and added them,
+so recall is measured against near-exhaustive labels. The review started from
+model proposals, so those labels are model-assisted rather than blind, and the
+share of human-added mounds (1 minus recall) measures how much that start
+mattered. This is field verification, not the frozen blind test, and it cannot
+substitute for it.
 """
 
 from __future__ import annotations
@@ -90,7 +92,8 @@ class ReviewReport:
         problems: Integrity failures, empty when the file is sound.
         moved: Mound ids whose geometry the reviewer relocated, with distance.
         precision: Confirmed over all reviewed proposals, or None if none were.
-        recall_floor: Confirmed over confirmed plus added, or None.
+        recall_model_assisted: Confirmed over confirmed plus added, or None. Model-assisted:
+            the labels come from a review that started from model proposals.
     """
 
     sheet_id: str
@@ -98,7 +101,7 @@ class ReviewReport:
     problems: list[str] = field(default_factory=list)
     moved: dict[str, float] = field(default_factory=dict)
     precision: float | None = None
-    recall_floor: float | None = None
+    recall_model_assisted: float | None = None
 
     @property
     def sound(self) -> bool:
@@ -113,12 +116,15 @@ class ReviewReport:
             "problems": self.problems,
             "moved": self.moved,
             "precision": self.precision,
-            "recall_floor": self.recall_floor,
+            "recall_model_assisted": self.recall_model_assisted,
             "scope": (
-                "Field verification by domain experts on model-proposed candidates. Precision "
-                "is measured over every proposal. Recall is a floor: it counts only the mounds "
-                "a reviewer independently added, which is not an exhaustive search. Not the "
-                "frozen blind test set and not a substitute for it."
+                "Expert review of model-proposed candidates. Every proposal received a verdict, "
+                "so precision is measured over all of them. Reviewers also searched each sheet "
+                "for mounds the model had missed and added them, so recall is measured against "
+                "near-exhaustive labels. The review started from model proposals, so those "
+                "labels are model-assisted rather than blind; the share of human-added mounds "
+                "(1 minus recall) measures how much that start mattered. Not the frozen blind "
+                "test set and not a substitute for it."
             ),
         }
 
@@ -216,7 +222,7 @@ def check(
         report.precision = round((counts[CONFIRMED] + counts[CORRECTED]) / judged, 4)
     found = counts[CONFIRMED] + counts[CORRECTED]
     if found + counts[ADDED]:
-        report.recall_floor = round(found / (found + counts[ADDED]), 4)
+        report.recall_model_assisted = round(found / (found + counts[ADDED]), 4)
     return report
 
 
@@ -241,9 +247,7 @@ def _selected(
         if verdict not in verdicts:
             continue
         properties = dict(feature.properties)
-        properties[PROVENANCE] = PROVENANCE_BY_VERDICT.get(
-            verdict, properties.get(PROVENANCE, "")
-        )
+        properties[PROVENANCE] = PROVENANCE_BY_VERDICT.get(verdict, properties.get(PROVENANCE, ""))
         properties.update(extra or {})
         features.append(Feature(geometry=feature.geometry, properties=properties))
     return FeatureCollection(features=features, crs=returned.crs, name=returned.name)
@@ -338,7 +342,11 @@ def main() -> None:
         logger.warning("%s", problem)
     logger.info("verdicts: %s", report.counts)
     if report.precision is not None:
-        logger.info("precision %.3f, recall floor %s", report.precision, report.recall_floor)
+        logger.info(
+            "precision %.3f, recall (model-assisted) %s",
+            report.precision,
+            report.recall_model_assisted,
+        )
 
     document = to_coco(returned, reference, schema)
     document.save(output / "instances_default.json")

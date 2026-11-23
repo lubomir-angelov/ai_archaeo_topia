@@ -17,7 +17,7 @@ from archeo_topia.analysis.sweep_sheets import (
 from archeo_topia.datasets.build_detection_windows import plan_windows
 
 RUN = Path("artifacts/detection/v0_5_yolo26s_gtfix")
-DATASET = Path("data/curated/datasets/mapsam_det_v1")
+DATASET = Path("data/curated/datasets/mapsam_det_v1_c3")
 IMAGES = Path("data/curated/datasets/mapsam_v02/images")
 
 
@@ -113,7 +113,7 @@ class TestTilingParity:
 
 @pytest.mark.skipif(
     not (RUN / "foldB" / "weights" / "last.pt").exists() or not DATASET.exists(),
-    reason="needs the v0.5 detector artifacts and the mapsam_det_v1 dataset",
+    reason="needs the v0.5 detector artifacts and the mapsam_det_v1_c3 dataset",
 )
 class TestRegressionAgainstV05:
     """Does the sweep reproduce a number the project already trusts?

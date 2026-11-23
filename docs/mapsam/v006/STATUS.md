@@ -126,7 +126,7 @@ Verified on the same simulated review that exposed the loss:
 
 ```
 verdicts: {'confirmed': 9, 'corrected': 45, 'rejected': 10}
-precision 0.844, recall floor 1.0
+precision 0.844, recall (model-assisted) 1.0
 wrote …: {'mound': 54, 'hard_negative_symbol': 10}
 ```
 
@@ -182,7 +182,7 @@ python -m archeo_topia.formats.ingest_review \
 ```
 
 It writes `review_report.json` and `instances_default.json`, and logs the
-verdict counts, precision, recall floor and the per-category annotation counts.
+verdict counts, precision, model-assisted recall and the per-category annotation counts.
 
 **Read `problems` in the report before anything else.** It is empty when the
 file is sound. A non-empty list means a changed CRS, a duplicated or edited
@@ -194,10 +194,12 @@ Then, in order:
 
 1. **Scope the numbers correctly when writing them up.** This is field
    verification by domain experts on model-proposed candidates. It measures
-   **precision** well, because every proposal gets a verdict. It measures
-   **recall only as a floor**, over what reviewers independently noticed, which
-   is not an exhaustive search. It is **not** the frozen blind test and cannot
-   substitute for it. `review_report.json` carries that sentence in its `scope`
+   **precision** well, because every proposal gets a verdict. Reviewers
+   also searched each sheet for missed mounds, so recall is measured against
+   near-exhaustive labels, but the review started from model proposals, so
+   those labels are **model-assisted, not blind**; the human-added share
+   (1 minus recall) measures how much that mattered. It is **not** the frozen
+   blind test and cannot substitute for it. `review_report.json` carries that sentence in its `scope`
    field so it travels with the numbers.
 2. **Check `K-35-39-A-g` separately if it comes back.** It is a working-pool
    sheet that the parent grouping puts in `test`, because it shares parent
