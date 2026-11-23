@@ -279,3 +279,114 @@ Facts only, read off the tables above; no causes are asserted.
 - End-to-end IoU>=0.5 is 0.863, 0.863 and 0.880 (`fixed`), higher than the detector recall@25px (0.803, 0.807, 0.827) on each fold, under the two different scoring definitions the tables use. IoU>=0.75 is 0.538, 0.602 and 0.622 (`fixed`).
 - The `fixed` and `detector` arms differ by at most 0.004 in pooled IoU>=0.5 (foldC, 0.880 against 0.876) and at most 0.020 in IoU>=0.75 (foldA, 0.538 against 0.518; foldC, 0.622 against 0.602). Missed count is identical across arms on every fold (25, 25, 20).
 - No candidate was neutralized by an ignore region (0 on every fold, detector and end to end). L-35-139-V-v has 10 annotations, so its rates carry wide intervals.
+
+---
+
+## Before opening 2 — the refit
+
+Written before opening 2, as `TEST_PROTOCOL.md` ("Opening 2 — the refit") requires. Opening 2 has not run; no refit test number exists. Every figure is copied from the named source file. Sheet names appear, no coordinates.
+
+### Refit configuration
+
+`configs/refit/v0_6_refit.json`, sha256 `db627b9ade994eaf6fd9a36fdc157975eed4662b8ee4ec880f17f53f942fef3f` (equal to `refit.config.sha256` in `data/curated/datasets/mapsam_det_refit_v001/metadata/build_report.json`, and to the hash recorded in `train_record.json`).
+
+| key | value |
+|---|---|
+| name | `v0_6_refit` |
+| model | `yolo26s.pt` |
+| window / stride | 512 / 384 |
+| epochs, batch, seed | 150, 16, 42 |
+| save_period | 25 |
+| development_source | `v0.0.3` |
+| label source `v0.0.3` | `annotation/cvat/v0.0.3/instances_default.json`, mound_rule `all` (input sha256 `3a84c53d874a4efe0a544b2f37cf5d6960fd9ef640d3c2d06b0cd5ecdae46a97`) |
+| label source `v0.0.5` | `annotation/cvat/v0.0.5/instances_default.json`, mound_rule `reviewed` (input sha256 `781d19ed01eb45d67bcabc7a5395c226c3b4c554da8fc11046e2dfa003812218`) |
+
+Training used imgsz 512 (`train_record.json`); early stopping is disabled by `patience=epochs + 1` in `src/archeo_topia/training/train_mound_detector.py`.
+
+### Label sources
+
+- **`annotation/cvat/v0.0.5`** (`PROVENANCE.json`): 55 sheets, cut from `artifacts/review/v0_7` against `configs/splits/v0_6_splits.json` (sha256 `5dada05532d3be114cbe87db183a4c503ada07790f4d16b88b0edda18c5a5ac5`). Counts by category: `mound` 1551, `hard_negative_symbol` 984, `uncertain_ignore` 0. Review status: `mound` confirmed 1366, corrected 140, added 45; `hard_negative_symbol` rejected 984.
+- **Excluded from the export:** `K-35-39-A-g`, reason `test_split`. It is a frozen-test sheet and never enters a label source used for training or selection.
+- **`annotation/cvat/v0.0.3`:** the corrected ground truth of record for the three development sheets `K-34-35-B-g`, `K-35-51-B-a`, `K-35-8-G-a`. No sheet is in both sources (`sheets_by_source` in the build report: 3 in `v0.0.3`, 55 in `v0.0.5`).
+
+### Training and selection sheets
+
+From `build_report.json`, `listing.listings` (plan `train_val`):
+
+- **train** (`train.txt`): 46 sheets, 7325 windows, the three development sheets included. Sheets: K-34-22-V-b, K-34-23-A-g, K-34-24-G-a, K-34-35-A-v, K-34-35-B-g, K-34-36-V-b, K-34-48-G-b, K-34-58-B-a, K-34-60-V-b, K-34-70-B-v, K-34-84-A-a, K-34-96-B-v, K-35-13-G-v, K-35-14-B-v, K-35-18-A-b, K-35-19-V-a, K-35-20-B-g, K-35-21-G-a, K-35-28-A-g, K-35-29-G-b, K-35-31-V-g, K-35-32-A-a, K-35-40-B-v, K-35-41-G-a, K-35-42-A-g, K-35-43-V-g, K-35-49-V-g, K-35-5-G-b, K-35-50-B-b, K-35-50-V-b, K-35-51-A-b, K-35-51-B-a, K-35-51-B-g, K-35-52-G-v, K-35-55-A-g, K-35-62-G-v, K-35-63-B-g, K-35-66-A-a, K-35-73-A-v, K-35-75-B-a, K-35-75-B-g, K-35-77-A-g, K-35-8-G-a, K-35-8-V-g, K-35-86-A-b, K-35-88-G-g.
+- **val / selection** (`val.txt`): 12 sheets, 1908 windows. Sheets: K-34-10-A-g, K-34-47-A-a, K-34-47-G-g, K-34-83-V-g, K-35-16-A-a, K-35-16-B-a, K-35-27-B-b, K-35-38-A-a, K-35-44-B-a, K-35-53-A-g, K-35-67-B-v, K-35-87-G-a.
+- Dataset totals: 9240 windows, 1756 with a mound, 1612 hard-negative-only, 5872 empty; 1720 mound annotations, 3370 mound targets written.
+
+### Excluded sheets
+
+Copied from `refit.excluded_sheets` in the build report:
+
+| sheet | reason |
+|---|---|
+| `K-34-47-G-v` | `absent_from_label_source` |
+
+`K-34-47-G-v` is a `val`-split sheet of `configs/splits/v0_6_splits.json` (13 sheets) with no annotations in its label source, so it contributes no windows: 12 of the 13 val sheets are selection sheets. This is exclusion under the pre-registered *reviewed sheet* rule ("a sheet that is present in its label source and has no `unreviewed` mound"), not a deviation. No other sheet was excluded, and no test-split sheet is in the dataset.
+
+### Fork 6 B: uncertain regions and rejected mounds
+
+- `uncertain_dropped_train_windows`: count 7, all on `K-34-35-B-g` (development sheet, `v0.0.3`): `K-34-35-B-g_3_x01152_y01152`, `_3_x01152_y01536`, `_3_x01536_y01152`, `_3_x01536_y01536`, `_4_x00000_y00768`, `_4_x00000_y01152`, `_4_x00384_y01152`. `mound_targets_in_dropped`: 0, so no mound target was lost with the dropped windows.
+- Regions written: `hard_negative_symbol` 1526, `uncertain_ignore` 3.
+- `rejected_mounds_as_background`: count 0 (by sheet: none). The 984 rejected annotations in `v0.0.5` are `hard_negative_symbol`, which enter as background by rule.
+
+### `human_added` share on the selection sheets
+
+From `refit.selection_human_added`: 308 mound targets on the 12 selection sheets, 11 of them `human_added`; pooled share 0.0357 (11/308).
+
+| sheet | mound targets | human_added |
+|---|---:|---:|
+| K-34-10-A-g | 0 | 0 |
+| K-34-47-A-a | 2 | 0 |
+| K-34-47-G-g | 37 | 2 |
+| K-34-83-V-g | 7 | 0 |
+| K-35-16-A-a | 14 | 2 |
+| K-35-16-B-a | 6 | 0 |
+| K-35-27-B-b | 79 | 2 |
+| K-35-38-A-a | 80 | 3 |
+| K-35-44-B-a | 4 | 0 |
+| K-35-53-A-g | 35 | 1 |
+| K-35-67-B-v | 44 | 1 |
+| K-35-87-G-a | 0 | 0 |
+
+Framing, as the protocol sets it. The review of these sheets was thorough and included a deliberate search for mounds the model had missed, so the labels are intended to be on par with the frozen-set annotation. It was model-assisted, not blind: it started from v0.5 proposals. The `human_added` share measures how much that model-assisted start mattered; it is not a recall floor, and review recall is not claimed. Checkpoint selection on these sheets may slightly favour checkpoints that behave like v0.5. The frozen test set, annotated blind, is the judge.
+
+### Training
+
+Source: `artifacts/detection/v0_6_refit/train/train_record.json`.
+
+- Model `yolo26s.pt`, imgsz 512, epochs 150, batch 16, seed 42, save_period 25.
+- Environment: python 3.13.5, torch 2.14.0, ultralytics 8.4.150, segment_anything 1.0; device `cuda:0` (NVIDIA GeForce RTX 5090).
+- Started (UTC) 2026-11-23T11:12:46.348008+00:00, finished 2026-11-23T13:57:44.850962+00:00.
+- Dataset `data/curated/datasets/mapsam_det_refit_v001`, build report sha256 `2d705ad30ce8e17df147523b33557fedf967ad04382a5a841201f870bc4ea2b7`.
+
+### Checkpoint selection
+
+Source: `artifacts/detection/v0_6_refit/selection/selection.json` (listing `val.txt`, 12 sheets, 1908 windows, confidence 0.25, imgsz 512, merge radius 10.0 px). Rule, in order: highest pooled recall@5px hits; then fewer false positives; then the later epoch. `best.pt` (mAP fitness) and `epoch0.pt` are ignored. Ultralytics names periodic saves by the 0-based epoch index, so `epochN.pt` holds the state after N+1 epochs; `last.pt` is the epoch-150 state.
+
+| candidate | epochs completed | hits/n | recall@5px | FP | FP/window |
+|---|---:|---:|---:|---:|---:|
+| `epoch25.pt` | 26 | 297/308 | 0.9643 | 11 | 0.0058 |
+| `epoch50.pt` | 51 | 302/308 | 0.9805 | 4 | 0.0021 |
+| `epoch75.pt` | 76 | 303/308 | 0.9838 | 6 | 0.0031 |
+| `epoch100.pt` | 101 | 302/308 | 0.9805 | 4 | 0.0021 |
+| **`epoch125.pt` (chosen)** | 126 | 304/308 | 0.9870 | 2 | 0.0010 |
+| `last.pt` | 150 | 303/308 | 0.9838 | 5 | 0.0026 |
+
+`epoch125.pt` has the highest hit count outright, so neither tie-break applies. sha256 `8612f1247e3bc112316f5ef2e34e3f4783d2c97231b64420f26ba8c6ad3e2aff`. These are validation figures on model-assisted labels, not test results.
+
+### Frozen manifest
+
+`docs/mapsam/v006/analysis/frozen_manifest.json`: base of 29 entries, sha256 `5d111b38a52da5ca265cd653faba928b9e124a7b15513c26ef58b3724140fd0c`, equal to the manifest sha256 in opening 1's `run_record.json`. Extended to 31 entries, new sha256 `e93885a28326c99589f67ec8007f64287479b58e77151ee46c5f46df59dcb6c9` (recomputed with `sha256sum`). The two appended entries:
+
+| role | path | sha256 |
+|---|---|---|
+| `refit_detector` (checkpoint `epoch125.pt`) | `artifacts/detection/v0_6_refit/train/refit/weights/epoch125.pt` | `8612f1247e3bc112316f5ef2e34e3f4783d2c97231b64420f26ba8c6ad3e2aff` |
+| `refit_selection` | `artifacts/detection/v0_6_refit/selection/selection.json` | `f2822f674217a01a0f350e8d6919457cbd07a56a8852d0c3c2de97d5aeeb4007` |
+
+### Deviations from the pre-registered refit
+
+None found. Compared against the protocol table: model `yolo26s.pt`, imgsz 512, epochs 150, batch 16, seed 42, early stopping disabled, windows 512/384, exactly two label sources with no shared sheet, the `all` and `reviewed` mound rules, train and selection sheets from the `train` and `val` splits, no test-split sheet, six checkpoint candidates scored at confidence 0.25 with `best.pt` unused, and artifacts under `artifacts/detection/v0_6_refit/`. The one excluded sheet (`K-34-47-G-v`) falls under the reviewed-sheet rule and is not a deviation. The `rejected` mound rule did not trigger (0 rejected mounds as background).
