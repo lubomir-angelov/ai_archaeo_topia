@@ -215,6 +215,23 @@
       "root": "repo",
       "path": "data/curated/datasets/mapsam_det_frozen_v001/metadata/build_report.json",
       "sha256": "78e8245d7e4463796342761e67cb7e89916a26a061496e0c6522c58b16e74722"
+    },
+    {
+      "role": "refit_detector",
+      "checkpoint": "epoch125.pt",
+      "root": "repo",
+      "path": "artifacts/detection/v0_6_refit/train/refit/weights/epoch125.pt",
+      "sha256": "8612f1247e3bc112316f5ef2e34e3f4783d2c97231b64420f26ba8c6ad3e2aff"
+    },
+    {
+      "role": "refit_selection",
+      "root": "repo",
+      "path": "artifacts/detection/v0_6_refit/selection/selection.json",
+      "sha256": "f2822f674217a01a0f350e8d6919457cbd07a56a8852d0c3c2de97d5aeeb4007"
     }
-  ]
+  ],
+  "base": {
+    "entries": 29,
+    "sha256": "5d111b38a52da5ca265cd653faba928b9e124a7b15513c26ef58b3724140fd0c"
+  }
 }
