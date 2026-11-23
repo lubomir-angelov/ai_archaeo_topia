@@ -333,7 +333,7 @@ not a deviation.
 | recall radii | 5, 10, 15, 25 px; **5 px primary** | `detection_metrics.RECALL_RADII` |
 | localization acceptance | **p90 centre error ≤ 5 px** over matched detections | the v0.4 handoff target |
 | false-positive attribution | an unmatched detection within 15 px of a `hard_negative_symbol` box is attributed to that box's `negative_type` | `detection_metrics.ATTRIBUTION_RADIUS` |
-| end-to-end association | every candidate whose centre is within 25 px of a mound on both axes; each mound keeps its best IoU over all candidates | `mapsam_end_to_end.run_fold` |
+| end-to-end association | every candidate whose centre is within 25 px of a mound on both axes is scored against it; each mound keeps its best IoU over those candidates; a mound is missed iff that best IoU is 0 (amended 2026-11-23, below) | `mapsam_end_to_end.run_fold` |
 | end-to-end IoU thresholds | 0.5, 0.75 | `mapsam_end_to_end.IOU_THRESHOLDS` |
 
 **Why 0.25 is the headline.** The v0.5 tables of record and the whole
@@ -408,8 +408,17 @@ inflated or deflated by clip selection.
 | mean IoU, all scorable mounds | missed mounds count 0 |
 | median IoU, all scorable mounds | |
 | mean IoU, found mounds only | the segmentation quality conditional on detection, as in `../v005/RESULTS.md` |
-| missed rate | mounds with no candidate within 25 px |
+| missed rate | mounds no candidate mask overlaps (best IoU 0), as in v0.5 |
 | false masks | candidates with no mound within 25 px, ignored regions excluded |
+
+**Amendment 2026-11-23 — end-to-end "missed" definition.** Made after the C1
+reproduction check failed and before any test number existed. The pre-registered
+rule (missed = no candidate within 25 px) disagreed with v0.5 only on fold A
+mounds `K-35-51-B-a_3.png` #543 and #552, where a 25 px neighbour's candidate
+segmented the neighbour, not the mound. The v0.5 rule was adopted (missed =
+best IoU over candidates is exactly 0, found otherwise; mean IoU over found
+mounds uses the same found set) so that C1 reproduces v0.5 exactly, with C3 the
+only difference. "False masks" and the detector-level metrics are unchanged.
 
 ### Per sheet, pooled, and what four sheets can carry
 

@@ -367,13 +367,12 @@ def _end_to_end_block(
     candidates: int,
     false_masks: int,
     best_iou: Mapping[str, float],
-    found: set[str],
 ) -> dict[str, Any]:
     """Assemble one ``E2EBlock`` over a set of scorable annotations."""
     total = len(scorable)
     keys = [annotation_key(a.image, a.annotation_id) for a in scorable]
     ious = [best_iou[key] for key in keys]
-    found_ious = [best_iou[key] for key in keys if key in found]
+    found_ious = [iou for iou in ious if iou > 0.0]
     block: dict[str, Any] = {
         "scorable_annotations": total,
         "mounds_without_geometry": mounds_without_geometry,
@@ -420,8 +419,10 @@ def score_end_to_end(
 
     Candidates inside an ``uncertain_ignore`` region are neutralized: excluded
     before association and never counted as false masks. An annotation is
-    *found* when a live candidate lies within the association radius on both
-    axes, and *missed* otherwise; a missed annotation scores IoU 0 in the mean.
+    *found* when its best mask IoU over the live candidates is above zero, and
+    *missed* when it is exactly zero (no candidate mask overlaps it); a missed
+    annotation scores IoU 0 in the mean. The association radius still decides
+    which candidates are scored against an annotation and which are false masks.
 
     Args:
         candidates: Candidates that were segmented.
@@ -455,7 +456,6 @@ def score_end_to_end(
     live_ids = {id(c) for c in live}
 
     best_iou: dict[str, float] = defaultdict(float)
-    found: set[str] = set()
     live_by_sheet: dict[str, int] = defaultdict(int)
     false_masks_by_sheet: dict[str, int] = defaultdict(int)
     for candidate, (predicted, (wx0, wy0, size)) in zip(candidates, masks, strict=True):
@@ -475,7 +475,6 @@ def score_end_to_end(
             continue
         for annotation in nearby:
             key = annotation_key(annotation.image, annotation.annotation_id)
-            found.add(key)
             window_truth = truth_masks[(annotation.image, annotation.annotation_id)][
                 wy0 : wy0 + size, wx0 : wx0 + size
             ]
@@ -492,7 +491,6 @@ def score_end_to_end(
             sum(live_by_sheet[s] for s in sheets),
             sum(false_masks_by_sheet[s] for s in sheets),
             best_iou,
-            found,
         )
 
     per_sheet = {sheet: block_for([sheet]) for sheet in evaluation_set.sheets}

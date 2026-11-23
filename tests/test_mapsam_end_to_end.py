@@ -65,7 +65,7 @@ def test_a_perfect_candidate_scores_iou_one_and_a_missing_one_scores_zero(tmp_pa
     assert pooled["missed"] == {"count": 1, "rate": 0.5}
 
 
-def test_missed_means_no_candidate_within_the_association_box(tmp_path: Path) -> None:
+def test_missed_means_no_candidate_mask_overlaps_the_mound(tmp_path: Path) -> None:
     es = _set(tmp_path)
     far = e2e.score_end_to_end(
         [Detection("S-1_1.png", 130, 100, 0.9)], [_predicted(130, 100)], es, TRUTH
@@ -77,10 +77,38 @@ def test_missed_means_no_candidate_within_the_association_box(tmp_path: Path) ->
     near = e2e.score_end_to_end(
         [Detection("S-1_1.png", 120, 100, 0.9)], [_predicted(300, 300)], es, TRUTH
     )["pooled"]
-    # 20 px away, so found, even though the mask overlaps nothing.
+    # 20 px away but the mask overlaps nothing: not a false mask, yet the mound is missed.
     assert near["false_masks"] == 0
-    assert near["found"] == {"n": 1, "mean_iou": 0.0}
-    assert near["missed"]["count"] == 1
+    assert near["found"]["n"] == 0
+    assert math.isnan(near["found"]["mean_iou"])
+    assert near["missed"]["count"] == 2
+
+
+def test_a_candidate_near_two_mounds_finds_only_the_one_its_mask_overlaps(tmp_path: Path) -> None:
+    dataset = write_dataset(tmp_path / "ds")
+    lines = (dataset / "metadata" / "annotations.jsonl").read_text().splitlines()
+    records = [json.loads(line) for line in lines]
+    records[1]["sheet_id"] = "S-1"
+    records[1]["source_image"] = "S-1_1.png"
+    records[1]["center_source_xy"] = [110.0, 100.0]
+    (dataset / "metadata" / "annotations.jsonl").write_text(
+        "".join(json.dumps(r) + "\n" for r in records)
+    )
+    es = load_evaluation_set(dataset, dataset / "all.txt", ["S-1", "S-2"])
+    truth = {
+        ("S-1_1.png", 1): _truth(100, 100),
+        ("S-1_1.png", 2): _truth(110, 100, half=2),
+    }
+    scored = e2e.score_end_to_end(
+        [Detection("S-1_1.png", 100, 100, 0.9)],
+        [_predicted(100, 100, half=5)],
+        es,
+        truth,
+    )["pooled"]
+    # Both mounds are within 25 px of the candidate; the mask reaches only the first.
+    assert scored["false_masks"] == 0
+    assert scored["found"]["n"] == 1
+    assert scored["missed"]["count"] == 1
 
 
 def test_a_candidate_in_an_ignore_region_is_neutralized_not_a_false_mask(tmp_path: Path) -> None:
