@@ -289,3 +289,62 @@ SAM 2 MCP **does not** accept PDFs.  The correct flow is:
 If a PDF is passed to SAM 2 MCP, it will be rejected with a `ValidationError`
 explaining that PDFs should be handled by the DeepSeek OCR MCP or a document
 preprocessing step.
+
+---
+
+## Registering the server with an MCP client (`.mcp.json`)
+
+**`.mcp.json` is gitignored**, so this configuration does not travel with the
+repository and has to be reproduced on each machine. It is recorded here
+because getting it wrong produces a `CONNECTION_CLOSED` that looks like a
+service fault and is not one.
+
+```json
+{
+  "mcpServers": {
+    "sam2-mcp": {
+      "command": "${HOME}/venvs/ai_archaeo_topia/bin/python",
+      "args": ["-m", "services.sam2_mcp.server"],
+      "cwd": "${HOME}/repos/ai_archaeo_topia",
+      "env": { "PYTHONPATH": "${HOME}/repos/ai_archaeo_topia/src" }
+    }
+  }
+}
+```
+
+### The failure this avoids
+
+Diagnosed in v0.6, after the server had failed to connect in two consecutive
+sessions. The configuration used a bare `python3`, which resolves to the
+system or pyenv interpreter rather than the project virtualenv. Those are two
+different sets of packages, and the one that matters is `mcp`:
+
+| interpreter | `mcp` version | result |
+|---|---|---|
+| bare `python3` (pyenv) | 2.2.0 | `AttributeError: 'Server' object has no attribute 'list_tools'` |
+| `~/venvs/ai_archaeo_topia/bin/python` | 1.27.1 | initializes normally |
+
+`server.py` uses the low-level `Server` decorator API — `@server.list_tools()`
+and `@server.call_tool()` — which the MCP SDK removed in 2.x. The server
+therefore crashed during `create_server()`, before the stdio transport was
+established, and the client saw only a closed connection.
+
+`pyproject.toml` now declares `mcp>=1.20,<2` so a fresh install cannot pick up
+the incompatible major version. Porting to the 2.x API is a separate piece of
+work and is not required for the annotation-assist path.
+
+### Verifying
+
+```bash
+make sam2-mcp-health                      # service-level check, mock backend
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}' \
+  | ~/venvs/ai_archaeo_topia/bin/python -m services.sam2_mcp.server
+```
+
+The second command must return a JSON-RPC result carrying `serverInfo`. A
+traceback instead means the interpreter is wrong.
+
+**Note on the critical path.** Model-assisted annotation (MapSAM v0.6 step 3)
+imports COCO into CVAT via `archeo_topia.datasets.export_proposals_coco` and
+does **not** depend on this server. Fixing it is worthwhile; it is not a
+blocker.

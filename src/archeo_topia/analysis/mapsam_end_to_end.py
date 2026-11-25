@@ -33,14 +33,25 @@ untested. So this runs both:
 The decoder is frozen at its v0.4 fold checkpoint and is not retrained here.
 Changing both ends at once would make the number uninterpretable.
 
+The module is split along the inference / scoring seam. ``segment_candidates``
+runs the model; ``score_end_to_end`` is pure. A detector and a decoder are
+paired explicitly at every call site (``run_pair``), never by a fold-name
+convention inside the scorer.
+
+Neutralization follows the detection scorer: a candidate inside an
+``uncertain_ignore`` region is segmented like every other, then excluded from
+scoring through ``detection_metrics.neutralize`` and counted, not scored as a
+false mask.
+
 Usage:
     python -m archeo_topia.analysis.mapsam_end_to_end \\
         --dataset data/curated/datasets/mapsam_det_v0 \\
         --detector-run artifacts/detection/v0_5_yolo26s \\
         --mapsam-root artifacts/models/mapsam \\
         --images-root data/curated/datasets/mapsam_v02/images \\
-        --coco-json annotation/cvat/v0.0.1/instances_default.json \\
-        --fold all --confidence 0.25 --output-dir artifacts/detection/v0_5_end_to_end
+        --coco-json annotation/cvat/v0.0.2/instances_default.json \\
+        --fold all --confidence 0.25 --device cuda:0 \\
+        --output-dir artifacts/detection/v0_5_end_to_end
 """
 
 from __future__ import annotations
@@ -49,6 +60,7 @@ import argparse
 import json
 import logging
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -60,17 +72,29 @@ from PIL import Image
 from archeo_topia.analysis.detection_metrics import (
     ASSOCIATION_RADIUS,
     Detection,
-    filter_by_sheet,
-    load_annotations,
+    EvaluationSet,
+    annotation_key,
+    load_evaluation_set,
+    macro_summary,
     merge_detections,
+    neutralize,
+    wilson_interval,
 )
+from archeo_topia.analysis.runtime import new_directory, resolve_device, write_record
 from archeo_topia.datasets.build_detection_windows import (
     FOLDS,
     MOUND,
     decode_mask,
     find_image,
+    repo_relative,
 )
 from archeo_topia.datasets.mapsam_window import compute_window
+from archeo_topia.training.train_mound_detector import (
+    HEADLINE_CONFIDENCE,
+    MIN_CONFIDENCE,
+    fold_weights_path,
+    predict_windows,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,34 +107,41 @@ BOX_PADDING = 4.0
 #: IoU thresholds the end-to-end rate is reported at.
 IOU_THRESHOLDS = (0.5, 0.75)
 
+#: Prompt arms. ``fixed`` is a median-sized box on the candidate centre;
+#: ``detector`` is the detector's own box.
+BOX_MODES = ("fixed", "detector")
 
-def load_mapsam(
-    fold: str,
-    mapsam_root: Path,
-    sam_checkpoint: Path,
-    device: torch.device,
-    run_prefix: str = "v0_4r_loso512",
-) -> Any:
-    """Load the v0.4 512-window decoder for one fold.
+
+def decoder_checkpoint_path(mapsam_root: Path, prefix: str, fold: str) -> Path:
+    """Return a LOSO fold's MapSAM decoder checkpoint.
 
     Args:
+        mapsam_root: Directory of MapSAM training runs.
+        prefix: Run-name prefix, for example ``v0_4r_loso512``.
         fold: Fold name.
-        mapsam_root: Root holding the decoder run directories.
+
+    Returns:
+        Path to ``final.pt``.
+    """
+    return mapsam_root / f"{prefix}_{fold}_pw20" / "checkpoints" / "final.pt"
+
+
+def load_mapsam(checkpoint: Path, sam_checkpoint: Path, device: torch.device) -> Any:
+    """Load a MapSAM decoder checkpoint on top of the base SAM.
+
+    Args:
+        checkpoint: Decoder checkpoint, for example a v0.4 fold ``final.pt``.
         sam_checkpoint: Base SAM ViT-B checkpoint the decoder was trained on.
         device: Target device.
-        run_prefix: Run-directory prefix. Defaults to the v0.4 revision trained
-            on the corrected annotations; pass ``v0_4_loso512`` to use the
-            original checkpoints instead.
 
     Returns:
         The SAM model in eval mode.
 
     Raises:
-        FileNotFoundError: If the fold checkpoint is missing.
+        FileNotFoundError: If the decoder checkpoint is missing.
     """
     from archeo_topia.training.train_mapsam_v0 import build_sam_model, load_checkpoint
 
-    checkpoint = mapsam_root / f"{run_prefix}_{fold}_pw20" / "checkpoints" / "final.pt"
     if not checkpoint.exists():
         raise FileNotFoundError(f"MapSAM checkpoint not found: {checkpoint}")
 
@@ -233,59 +264,81 @@ def mask_iou(predicted: np.ndarray, truth: np.ndarray) -> float:
     return float(intersection / union) if union else 0.0
 
 
-def run_fold(
-    fold: str,
-    dataset: Path,
-    detector_run: Path,
-    mapsam_root: Path,
-    images_root: Path,
-    coco_json: Path,
-    sam_checkpoint: Path,
-    confidence: float,
-    box_modes: tuple[str, ...],
-    detector_imgsz: int,
-    window_px: int,
-    image_size: int,
-    merge_radius: float,
-    device: torch.device,
-    mapsam_prefix: str = "v0_4r_loso512",
-) -> dict[str, Any]:
-    """Run the full pipeline for one fold and score it.
+def resolve_candidates(
+    raw: Sequence[Detection], confidence: float, merge_radius: float
+) -> list[Detection]:
+    """Filter raw detections to an operating point and merge duplicates.
 
     Args:
-        fold: Fold name.
-        dataset: Detection dataset root.
-        detector_run: Detector run root holding per-fold weights.
-        mapsam_root: Root holding the v0.4 MapSAM runs.
-        images_root: Root of the clip images.
-        coco_json: CVAT COCO export, for per-annotation ground-truth masks.
-        sam_checkpoint: Base SAM checkpoint.
+        raw: Raw source-coordinate detections, before merging.
         confidence: Detector confidence threshold.
-        box_modes: Prompt arms to run.
-        detector_imgsz: Detector inference size; must match its training size.
-        window_px: Window side length.
-        image_size: Encoder input size.
         merge_radius: Cross-window deduplication radius.
-        device: Target device.
-        mapsam_prefix: Decoder run-directory prefix.
 
     Returns:
-        Metrics for the fold, one block per prompt arm.
+        The candidates the segmenter is run on.
     """
-    from archeo_topia.training.train_mound_detector import predict_fold
+    return merge_detections([d for d in raw if d.score >= confidence], radius=merge_radius)
 
-    eval_sheet = FOLDS[fold]
-    annotations, _, _ = load_annotations(dataset / "metadata")
-    eval_annotations = filter_by_sheet(annotations, eval_sheet)
-    scorable = [a for a in eval_annotations if a.has_geometry]
 
-    weights = detector_run / fold / "weights" / "last.pt"
-    raw = predict_fold(weights, dataset, fold, detector_imgsz, confidence)
-    candidates = merge_detections(
-        [d for d in raw if d.score >= confidence], radius=merge_radius
-    )
-    logger.info("%s: %d candidates at conf %.2f", fold, len(candidates), confidence)
+def segment_candidates(
+    sam: Any,
+    candidates: Sequence[Detection],
+    clip_paths: Mapping[str, Path],
+    box_mode: str,
+    window_px: int,
+    image_size: int,
+    device: torch.device,
+) -> list[tuple[np.ndarray, tuple[int, int, int]]]:
+    """Segment every candidate under one prompt arm.
 
+    Args:
+        sam: Loaded MapSAM model.
+        candidates: Candidates to segment.
+        clip_paths: Source clip path by file name; must cover every candidate.
+        box_mode: ``fixed`` or ``detector``.
+        window_px: Window side length in source pixels.
+        image_size: Encoder input size.
+        device: Target device.
+
+    Returns:
+        One ``(mask, (window x0, window y0, size))`` per candidate, in order.
+
+    Raises:
+        ValueError: On an unknown arm or a candidate whose clip has no path.
+    """
+    if box_mode not in BOX_MODES:
+        raise ValueError(f"unknown box mode {box_mode!r}; have {list(BOX_MODES)}")
+    clips: dict[str, torch.Tensor] = {}
+    segmented = []
+    for candidate in candidates:
+        if candidate.image not in clips:
+            if candidate.image not in clip_paths:
+                raise ValueError(f"no clip path for candidate image {candidate.image}")
+            array = np.array(Image.open(clip_paths[candidate.image]).convert("RGB"))
+            clips[candidate.image] = torch.from_numpy(array).permute(2, 0, 1).float() / 255.0
+        segmented.append(
+            segment(
+                sam, clips[candidate.image], candidate, box_mode, window_px, image_size, device
+            )
+        )
+    return segmented
+
+
+def load_truth_masks(
+    coco_json: Path, evaluation_set: EvaluationSet
+) -> dict[tuple[str, int], np.ndarray]:
+    """Rasterize the ground-truth mound masks of the evaluation set's images.
+
+    Args:
+        coco_json: CVAT COCO export.
+        evaluation_set: Selects the images whose masks are needed.
+
+    Returns:
+        Mask by ``(image, annotation id)``, for annotations that have geometry.
+
+    Raises:
+        ValueError: If the export has no ``mound`` category.
+    """
     with open(coco_json, encoding="utf-8") as handle:
         coco = json.load(handle)
     images = {i["id"]: i for i in coco["images"]}
@@ -295,88 +348,251 @@ def run_fold(
     mound_ids = {c["id"] for c in coco["categories"] if c["name"] == MOUND}
     if not mound_ids:
         raise ValueError(f"no {MOUND!r} category in {coco_json}")
-    truth_masks: dict[int, np.ndarray] = {}
+    truth_masks: dict[tuple[str, int], np.ndarray] = {}
     for ann in coco["annotations"]:
         if ann["category_id"] not in mound_ids:
             continue
         meta = images[ann["image_id"]]
-        if meta["file_name"].rsplit("_", 1)[0] != eval_sheet:
+        if meta["file_name"] not in evaluation_set.image_sheet:
             continue
         mask = decode_mask(ann, meta["width"], meta["height"])
         if mask.any():
-            truth_masks[ann["id"]] = mask
+            truth_masks[(meta["file_name"], ann["id"])] = mask
+    return truth_masks
 
-    sam = load_mapsam(fold, mapsam_root, sam_checkpoint, device, mapsam_prefix)
 
-    clips: dict[str, torch.Tensor] = {}
-    for name in sorted({c.image for c in candidates} | {a.image for a in scorable}):
-        array = np.array(Image.open(find_image(images_root, name)).convert("RGB"))
-        clips[name] = torch.from_numpy(array).permute(2, 0, 1).float() / 255.0
+def _end_to_end_block(
+    scorable: Sequence[Any],
+    mounds_without_geometry: int,
+    candidates: int,
+    false_masks: int,
+    best_iou: Mapping[str, float],
+) -> dict[str, Any]:
+    """Assemble one ``E2EBlock`` over a set of scorable annotations."""
+    total = len(scorable)
+    keys = [annotation_key(a.image, a.annotation_id) for a in scorable]
+    ious = [best_iou[key] for key in keys]
+    found_ious = [iou for iou in ious if iou > 0.0]
+    block: dict[str, Any] = {
+        "scorable_annotations": total,
+        "mounds_without_geometry": mounds_without_geometry,
+        "candidates": candidates,
+        "false_masks": false_masks,
+    }
+    for threshold in IOU_THRESHOLDS:
+        hits = sum(1 for iou in ious if iou >= threshold)
+        low, high = wilson_interval(hits, total)
+        block[f"iou_{threshold:g}"] = {
+            "rate": hits / total if total else float("nan"),
+            "hits": hits,
+            "ci95": [low, high],
+        }
+    block["mean_iou"] = float(np.mean(ious)) if ious else float("nan")
+    block["median_iou"] = float(np.median(ious)) if ious else float("nan")
+    block["found"] = {
+        "n": len(found_ious),
+        "mean_iou": float(np.mean(found_ious)) if found_ious else float("nan"),
+    }
+    missed = total - len(found_ious)
+    block["missed"] = {"count": missed, "rate": missed / total if total else float("nan")}
+    block["per_annotation_iou"] = dict(zip(keys, ious, strict=True))
+    return block
 
-    results: dict[str, Any] = {"fold": fold, "eval_sheet": eval_sheet, "arms": {}}
 
-    for box_mode in box_modes:
-        best_iou: dict[int, float] = defaultdict(float)
-        claimed: dict[int, int] = {}
-        false_masks = 0
+def _macro_inputs(block: dict[str, Any]) -> dict[str, float]:
+    """Pick the per-sheet quantities that are summarized across sheets."""
+    inputs = {f"rate_iou_{t:g}": block[f"iou_{t:g}"]["rate"] for t in IOU_THRESHOLDS}
+    inputs["mean_iou"] = block["mean_iou"]
+    inputs["median_iou"] = block["median_iou"]
+    inputs["found_mean_iou"] = block["found"]["mean_iou"]
+    inputs["missed_rate"] = block["missed"]["rate"]
+    return inputs
 
-        for index, candidate in enumerate(candidates):
-            predicted, (wx0, wy0, size) = segment(
-                sam, clips[candidate.image], candidate, box_mode, window_px, image_size, device
-            )
-            nearby = [
-                a
-                for a in scorable
-                if a.image == candidate.image
-                and abs(a.x - candidate.x) <= ASSOCIATION_RADIUS
-                and abs(a.y - candidate.y) <= ASSOCIATION_RADIUS
+
+def score_end_to_end(
+    candidates: Sequence[Detection],
+    masks: Sequence[tuple[np.ndarray, tuple[int, int, int]]],
+    evaluation_set: EvaluationSet,
+    truth_masks: Mapping[tuple[str, int], np.ndarray],
+) -> dict[str, Any]:
+    """Score one prompt arm's masks against the ground truth. Pure.
+
+    Candidates inside an ``uncertain_ignore`` region are neutralized: excluded
+    before association and never counted as false masks. An annotation is
+    *found* when its best mask IoU over the live candidates is above zero, and
+    *missed* when it is exactly zero (no candidate mask overlaps it); a missed
+    annotation scores IoU 0 in the mean. The association radius still decides
+    which candidates are scored against an annotation and which are false masks.
+
+    Args:
+        candidates: Candidates that were segmented.
+        masks: ``segment_candidates`` output for the same candidates.
+        evaluation_set: What to score against.
+        truth_masks: ``load_truth_masks`` output.
+
+    Returns:
+        ``{"pooled", "per_sheet", "macro"}`` of ``E2EBlock`` s.
+
+    Raises:
+        ValueError: If masks and candidates disagree in length, a candidate lies
+            outside the evaluation set, or a scorable annotation has no truth
+            mask.
+    """
+    if len(masks) != len(candidates):
+        raise ValueError(f"{len(masks)} masks for {len(candidates)} candidates")
+    foreign = sorted({c.image for c in candidates} - set(evaluation_set.image_sheet))
+    if foreign:
+        raise ValueError(f"candidates on images outside the evaluation set: {foreign}")
+    scorable = [a for a in evaluation_set.annotations if a.has_geometry]
+    missing = sorted(
+        annotation_key(a.image, a.annotation_id)
+        for a in scorable
+        if (a.image, a.annotation_id) not in truth_masks
+    )
+    if missing:
+        raise ValueError(f"scorable annotations without a truth mask: {missing}")
+
+    live, _ = neutralize(candidates, evaluation_set.ignore_regions)
+    live_ids = {id(c) for c in live}
+
+    best_iou: dict[str, float] = defaultdict(float)
+    live_by_sheet: dict[str, int] = defaultdict(int)
+    false_masks_by_sheet: dict[str, int] = defaultdict(int)
+    for candidate, (predicted, (wx0, wy0, size)) in zip(candidates, masks, strict=True):
+        if id(candidate) not in live_ids:
+            continue
+        sheet = evaluation_set.image_sheet[candidate.image]
+        live_by_sheet[sheet] += 1
+        nearby = [
+            a
+            for a in scorable
+            if a.image == candidate.image
+            and abs(a.x - candidate.x) <= ASSOCIATION_RADIUS
+            and abs(a.y - candidate.y) <= ASSOCIATION_RADIUS
+        ]
+        if not nearby:
+            false_masks_by_sheet[sheet] += 1
+            continue
+        for annotation in nearby:
+            key = annotation_key(annotation.image, annotation.annotation_id)
+            window_truth = truth_masks[(annotation.image, annotation.annotation_id)][
+                wy0 : wy0 + size, wx0 : wx0 + size
             ]
-            if not nearby:
-                false_masks += 1
-                continue
-            for annotation in nearby:
-                truth = truth_masks.get(annotation.annotation_id)
-                if truth is None:
-                    continue
-                window_truth = truth[wy0 : wy0 + size, wx0 : wx0 + size]
-                iou = mask_iou(predicted, window_truth)
-                if iou > best_iou[annotation.annotation_id]:
-                    best_iou[annotation.annotation_id] = iou
-                    claimed[annotation.annotation_id] = index
+            iou = mask_iou(predicted, window_truth)
+            if iou > best_iou[key]:
+                best_iou[key] = iou
 
-        total = len(scorable)
-        arm: dict[str, Any] = {
-            "candidates": len(candidates),
-            "scorable_annotations": total,
-            "false_masks": false_masks,
-            "mean_iou": float(np.mean([best_iou[a.annotation_id] for a in scorable])),
-        }
-        for threshold in IOU_THRESHOLDS:
-            hits = sum(1 for a in scorable if best_iou[a.annotation_id] >= threshold)
-            arm[f"rate_iou_{threshold:g}"] = hits / total if total else float("nan")
-            arm[f"hits_iou_{threshold:g}"] = hits
-        arm["missed_rate"] = sum(1 for a in scorable if best_iou[a.annotation_id] == 0.0) / total
-        arm["per_annotation_iou"] = {
-            str(a.annotation_id): round(best_iou[a.annotation_id], 4) for a in scorable
-        }
-        results["arms"][box_mode] = arm
-        logger.info(
-            "%s %s: IoU>=0.5 %.3f, IoU>=0.75 %.3f, mean %.4f",
-            fold,
-            box_mode,
-            arm["rate_iou_0.5"],
-            arm["rate_iou_0.75"],
-            arm["mean_iou"],
+    def block_for(sheets: Sequence[str]) -> dict[str, Any]:
+        in_sheets = set(sheets)
+        members = [a for a in evaluation_set.annotations if a.sheet in in_sheets]
+        return _end_to_end_block(
+            [a for a in members if a.has_geometry],
+            sum(1 for a in members if not a.has_geometry),
+            sum(live_by_sheet[s] for s in sheets),
+            sum(false_masks_by_sheet[s] for s in sheets),
+            best_iou,
         )
 
-    return results
+    per_sheet = {sheet: block_for([sheet]) for sheet in evaluation_set.sheets}
+    inputs = [_macro_inputs(per_sheet[sheet]) for sheet in evaluation_set.sheets]
+    return {
+        "pooled": block_for(evaluation_set.sheets),
+        "per_sheet": per_sheet,
+        "macro": {name: macro_summary([row[name] for row in inputs]) for name in inputs[0]},
+    }
 
 
-def format_report(results: list[dict[str, Any]]) -> str:
+def run_pair(
+    raw: Sequence[Detection],
+    detector_weights: Path,
+    decoder_checkpoint: Path,
+    sam_checkpoint: Path,
+    evaluation_set: EvaluationSet,
+    coco_json: Path,
+    clip_paths: Mapping[str, Path],
+    confidence: float,
+    box_modes: Sequence[str],
+    window_px: int,
+    image_size: int,
+    merge_radius: float,
+    device: torch.device,
+) -> dict[str, Any]:
+    """Run one detector's candidates through one decoder and score every arm.
+
+    The detector and the decoder are named explicitly. ``raw`` is the
+    detector's inference over the evaluation set, so one inference serves the
+    detection metrics and this stage.
+
+    Args:
+        raw: Raw detections from ``detector_weights`` over the evaluation set.
+        detector_weights: Detector the raw detections came from (recorded).
+        decoder_checkpoint: MapSAM decoder checkpoint.
+        sam_checkpoint: Base SAM checkpoint.
+        evaluation_set: What to score against.
+        coco_json: CVAT COCO export, for ground-truth masks.
+        clip_paths: Source clip path by file name.
+        confidence: Detector confidence threshold.
+        box_modes: Prompt arms to run.
+        window_px: Window side length.
+        image_size: Encoder input size.
+        merge_radius: Cross-window deduplication radius.
+        device: Target device.
+
+    Returns:
+        The pair record: ``config``, candidate counts and one block per arm.
+    """
+    candidates = resolve_candidates(raw, confidence, merge_radius)
+    _, neutralized = neutralize(candidates, evaluation_set.ignore_regions)
+    logger.info(
+        "%s: %d candidates at conf %.2f (%d neutralized by ignore)",
+        decoder_checkpoint,
+        len(candidates),
+        confidence,
+        neutralized,
+    )
+
+    truth_masks = load_truth_masks(coco_json, evaluation_set)
+    sam = load_mapsam(decoder_checkpoint, sam_checkpoint, device)
+
+    arms: dict[str, Any] = {}
+    for box_mode in box_modes:
+        masks = segment_candidates(
+            sam, candidates, clip_paths, box_mode, window_px, image_size, device
+        )
+        arms[box_mode] = score_end_to_end(candidates, masks, evaluation_set, truth_masks)
+        pooled = arms[box_mode]["pooled"]
+        logger.info(
+            "%s: IoU>=0.5 %.3f, IoU>=0.75 %.3f, mean %.4f",
+            box_mode,
+            pooled["iou_0.5"]["rate"],
+            pooled["iou_0.75"]["rate"],
+            pooled["mean_iou"],
+        )
+
+    return {
+        "config": {
+            "detector_weights": repo_relative(detector_weights),
+            "decoder_checkpoint": repo_relative(decoder_checkpoint),
+            "sam_checkpoint": repo_relative(sam_checkpoint),
+            "confidence": confidence,
+            "box_modes": list(box_modes),
+            "window_px": window_px,
+            "image_size": image_size,
+            "merge_radius": merge_radius,
+            "sheets": list(evaluation_set.sheets),
+            "device": str(device),
+        },
+        "candidates": len(candidates),
+        "candidates_neutralized_by_ignore": neutralized,
+        "arms": arms,
+    }
+
+
+def format_report(results: Mapping[str, dict[str, Any]]) -> str:
     """Render the end-to-end results as markdown.
 
     Args:
-        results: Per-fold result dicts.
+        results: Pair record by label, for example the fold.
 
     Returns:
         Markdown text.
@@ -384,25 +600,27 @@ def format_report(results: list[dict[str, Any]]) -> str:
     lines = [
         "## End-to-end: detector candidates through the frozen 512 decoder",
         "",
-        "Denominator is annotations with geometry on the evaluation sheet, not",
-        "segmentation samples and not all 180 annotations.",
+        "Denominator is annotations with geometry, not segmentation samples and",
+        "not all annotations. Candidates inside an ignore region are neutralized.",
         "",
-        "| fold | sheet | arm | n | IoU>=0.5 | IoU>=0.75 | mean IoU | missed | false masks |",
+        "| run | scope | arm | n | IoU>=0.5 | IoU>=0.75 | mean IoU | missed | false masks |",
         "|---|---|---|---:|---:|---:|---:|---:|---:|",
     ]
-    for result in results:
+    for label, result in results.items():
         for arm_name, arm in result["arms"].items():
-            lines.append(
-                f"| {result['fold']} | {result['eval_sheet']} | `{arm_name}` "
-                f"| {arm['scorable_annotations']} | {arm['rate_iou_0.5']:.3f} "
-                f"| {arm['rate_iou_0.75']:.3f} | {arm['mean_iou']:.4f} "
-                f"| {arm['missed_rate']:.3f} | {arm['false_masks']} |"
-            )
+            scopes = {"pooled": arm["pooled"], **arm["per_sheet"]}
+            for scope, block in scopes.items():
+                lines.append(
+                    f"| {label} | {scope} | `{arm_name}` "
+                    f"| {block['scorable_annotations']} | {block['iou_0.5']['rate']:.3f} "
+                    f"| {block['iou_0.75']['rate']:.3f} | {block['mean_iou']:.4f} "
+                    f"| {block['missed']['rate']:.3f} | {block['false_masks']} |"
+                )
     return "\n".join(lines) + "\n"
 
 
 def main() -> None:
-    """Parse arguments and run the end-to-end evaluation."""
+    """Parse arguments and run the end-to-end evaluation, one pair per fold."""
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--dataset", type=Path, required=True)
     parser.add_argument("--detector-run", type=Path, required=True)
@@ -414,8 +632,8 @@ def main() -> None:
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--fold", default="all", choices=["all", *FOLDS])
-    parser.add_argument("--confidence", type=float, default=0.25)
-    parser.add_argument("--box-modes", nargs="+", default=["fixed", "detector"])
+    parser.add_argument("--confidence", type=float, default=HEADLINE_CONFIDENCE)
+    parser.add_argument("--box-modes", nargs="+", default=list(BOX_MODES), choices=BOX_MODES)
     parser.add_argument("--detector-imgsz", type=int, default=512)
     parser.add_argument("--window-px", type=int, default=512)
     parser.add_argument("--image-size", type=int, default=1024)
@@ -426,35 +644,40 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=args.log_level, format="%(levelname)s %(message)s")
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    device = resolve_device(args.device)
     folds = list(FOLDS) if args.fold == "all" else [args.fold]
+    # Before any inference: a rerun into a published output directory stops here.
+    new_directory(args.output_dir)
 
-    results = []
+    results: dict[str, dict[str, Any]] = {}
     for fold in folds:
-        results.append(
-            run_fold(
-                fold=fold,
-                dataset=args.dataset,
-                detector_run=args.detector_run,
-                mapsam_root=args.mapsam_root,
-                images_root=args.images_root,
-                coco_json=args.coco_json,
-                sam_checkpoint=args.sam_checkpoint,
-                confidence=args.confidence,
-                box_modes=tuple(args.box_modes),
-                detector_imgsz=args.detector_imgsz,
-                window_px=args.window_px,
-                image_size=args.image_size,
-                merge_radius=args.merge_radius,
-                device=device,
-                mapsam_prefix=args.mapsam_prefix,
-            )
+        evaluation_set = load_evaluation_set(
+            args.dataset, args.dataset / f"{fold}_val.txt", [FOLDS[fold]]
+        )
+        weights = fold_weights_path(args.detector_run, fold)
+        raw = predict_windows(weights, evaluation_set, args.detector_imgsz, MIN_CONFIDENCE, device)
+        clip_paths = {
+            name: find_image((args.images_root,), name) for name in evaluation_set.image_sheet
+        }
+        results[fold] = run_pair(
+            raw=raw,
+            detector_weights=weights,
+            decoder_checkpoint=decoder_checkpoint_path(args.mapsam_root, args.mapsam_prefix, fold),
+            sam_checkpoint=args.sam_checkpoint,
+            evaluation_set=evaluation_set,
+            coco_json=args.coco_json,
+            clip_paths=clip_paths,
+            confidence=args.confidence,
+            box_modes=args.box_modes,
+            window_px=args.window_px,
+            image_size=args.image_size,
+            merge_radius=args.merge_radius,
+            device=device,
         )
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / "end_to_end.json").write_text(json.dumps(results, indent=2), "utf-8")
+    write_record(args.output_dir / "end_to_end.json", json.dumps(results, indent=2))
     report = format_report(results)
-    (args.output_dir / "end_to_end.md").write_text(report, "utf-8")
+    write_record(args.output_dir / "end_to_end.md", report)
     print(report)
 
 

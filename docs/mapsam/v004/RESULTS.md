@@ -295,6 +295,16 @@ add. Both steps stay at the top of the v0.5 plan.
 `sam2_backend` test failures, and ruff errors outside `src/archeo_topia`
 (`make lint` is scoped to `src/services tests`).
 
+> **Corrected in v0.6 (2026-09-15).** The "seven" figure was carried forward
+> between documents without re-measurement. Measured: **3 failed, 545 passed,
+> 1 skipped**, all three in `tests/test_sam2_backend.py`
+> (`test_resolved_device_auto_no_cuda`, `test_sam2_mode_missing_checkpoint`,
+> `test_sam2_mode_no_checkpoint_set`). All three are environment-coupled
+> assertions rather than product bugs: one assumes no CUDA is present, two
+> assume the `sam2` extra is installed. `test_sam2_mcp.py` passes clean. The
+> conclusion the note supports — that this debt affects nothing above — is
+> unchanged.
+
 ---
 
 ## Reproduce

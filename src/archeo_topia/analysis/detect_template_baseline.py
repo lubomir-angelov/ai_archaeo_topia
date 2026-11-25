@@ -94,7 +94,7 @@ def extract_templates(
 
     for ann in annotations:
         if ann.image not in cache:
-            path = find_image(images_root, ann.image)
+            path = find_image((images_root,), ann.image)
             cache[ann.image] = cv2.cvtColor(
                 np.array(cv2.imread(str(path), cv2.IMREAD_COLOR)), cv2.COLOR_BGR2GRAY
             )
@@ -148,7 +148,10 @@ def detect_on_image(
     # Local maxima over a symbol-sized neighbourhood, thresholded.
     peaks = cv2.dilate(field, np.ones((size // 2 + 1, size // 2 + 1), np.uint8))
     ys, xs = np.nonzero((field >= threshold) & (field >= peaks))
-    return [Detection(image_name, float(x), float(y), float(field[y, x])) for y, x in zip(ys, xs, strict=True)]
+    return [
+        Detection(image_name, float(x), float(y), float(field[y, x]))
+        for y, x in zip(ys, xs, strict=True)
+    ]
 
 
 def run(
@@ -199,7 +202,7 @@ def run(
 
     floor = min(thresholds)
     for image_name in images:
-        gray = cv2.imread(str(find_image(images_root, image_name)), cv2.IMREAD_GRAYSCALE)
+        gray = cv2.imread(str(find_image((images_root,), image_name)), cv2.IMREAD_GRAYSCALE)
         pixels += gray.size
         detections += detect_on_image(gray, bank, image_name, floor)
 

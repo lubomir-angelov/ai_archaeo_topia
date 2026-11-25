@@ -509,6 +509,6 @@ has a target with a number on it.
 | `docs/mapsam/v004/RESULTS.md` | Tolerance curve, 512-window LOSO, failure anatomy |
 | `docs/mapsam/v005/PLAN.md` | The detector-first plan and its metric hierarchy |
 | `docs/mapsam/DATASET.md` | Annotation counts, component-area statistics |
-| `docs/annotation/PROTOCOL_BG.md` | Attribute definitions and annotation rules |
+| `docs/annotation/PROTOCOL_EN.md` | Attribute definitions and annotation rules |
 | `docs/GEOREF_IMPROVEMENTS.md` | Georeferencing failure analysis and pass rate |
 | `docs/automation/MCP_ARCHITECTURE.md` | The annotation-assist stack, distinct from this pipeline |

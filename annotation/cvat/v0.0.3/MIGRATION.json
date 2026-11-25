@@ -1,0 +1,30 @@
+{
+  "source_schema": "crossed_by_water_line",
+  "target_schema": "water_line_crossing",
+  "annotations": 714,
+  "by_category": {
+    "hard_negative_symbol": {
+      "none": 437,
+      "surface": 0,
+      "underground": 0,
+      "unreviewed": 105
+    },
+    "mound": {
+      "none": 168,
+      "surface": 0,
+      "underground": 1,
+      "unreviewed": 0
+    },
+    "uncertain_ignore": {
+      "none": 1,
+      "surface": 0,
+      "underground": 0,
+      "unreviewed": 2
+    }
+  },
+  "reviewed_corrections": [
+    "id 22 -> underground: K-35-8-G-a_1 (955.5, 627.5): real mound, genuine underground line",
+    "id 528 -> none: K-35-51-B-a_3 (314, 15.5): real mound, attribute set in error"
+  ],
+  "mounds_flagged_for_review": 0
+}
